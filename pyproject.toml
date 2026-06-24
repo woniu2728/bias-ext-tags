@@ -1,0 +1,9 @@
+[project]
+name = "bias-ext-tags"
+version = "0.1.0"
+dependencies = ["bias-core>=0.1,<0.2"]
+[project.entry-points."bias.extensions"]
+tags = "bias_ext_tags.backend.ext:extend"
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["bias_ext_tags*"]
