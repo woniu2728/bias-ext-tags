@@ -23,9 +23,9 @@ from extensions.discussions.backend.events import DiscussionCreatedEvent
 from extensions.posts.backend.events import PostCreatedEvent, PostHiddenEvent
 from bias_core.models import AuditLog, ExtensionInstallation
 from bias_core.extensions import ResourceEndpointDefinition
-from extensions.testing import ResourceRegistry, get_resource_registry
+from bias_core.testing import ResourceRegistry, get_resource_registry
 from bias_core.settings_service import clear_runtime_setting_caches
-from extensions.testing import ExtensionRuntimeTestMixin
+from bias_core.testing import ExtensionRuntimeTestMixin
 from bias_ext_tags.backend.events import DiscussionTaggedEvent, TagStatsRefreshRequestedEvent
 from bias_ext_tags.backend.models import Tag
 from bias_core.extensions.runtime import get_runtime_discussion_tag_model
@@ -198,7 +198,7 @@ class TagStatsTests(TestCase):
         from bias_ext_tags.backend.tasks import refresh_tag_stats_task
 
         clear_runtime_setting_caches()
-        with patch("apps.core.queue_service.QueueService.get_runtime_config", return_value={"enabled": True, "driver": "redis"}):
+        with patch("bias_core.queue_service.QueueService.get_runtime_config", return_value={"enabled": True, "driver": "redis"}):
             with patch.object(refresh_tag_stats_task, "delay") as delay:
                 with patch("bias_ext_tags.backend.services.TagService.refresh_tag_stats") as refresh_tag_stats:
                     with self.captureOnCommitCallbacks(execute=True):
@@ -410,7 +410,7 @@ class TagAccessApiTests(TestCase):
         )
 
         with patch("bias_ext_tags.backend.handlers.get_runtime_resource_registry", return_value=registry):
-            with patch("apps.core.resource_dispatcher.get_runtime_resource_registry", return_value=registry):
+            with patch("bias_core.resource_dispatcher.get_runtime_resource_registry", return_value=registry):
                 response = self.client.get(
                     f"/api/tags/{self.members_tag.id}",
                     **self.auth_header(self.admin),
@@ -829,7 +829,7 @@ class TagDiscussionForumApiTests(TestCase):
         )
 
         mocked_bus = Mock()
-        with patch("apps.core.domain_events.get_forum_event_bus", return_value=mocked_bus):
+        with patch("bias_core.domain_events.get_forum_event_bus", return_value=mocked_bus):
             with self.captureOnCommitCallbacks(execute=True):
                 update_runtime_discussion(
                     discussion_id=discussion.id,
@@ -865,7 +865,7 @@ class TagDiscussionForumApiTests(TestCase):
         )
 
         mocked_bus = Mock()
-        with patch("apps.core.domain_events.get_forum_event_bus", return_value=mocked_bus):
+        with patch("bias_core.domain_events.get_forum_event_bus", return_value=mocked_bus):
             with self.captureOnCommitCallbacks(execute=True):
                 update_runtime_discussion(
                     discussion_id=discussion.id,
@@ -936,7 +936,7 @@ class TagDiscussionForumApiTests(TestCase):
         )
 
         mocked_bus = Mock()
-        with patch("apps.core.domain_events.get_forum_event_bus", return_value=mocked_bus):
+        with patch("bias_core.domain_events.get_forum_event_bus", return_value=mocked_bus):
             with self.captureOnCommitCallbacks(execute=True):
                 delete_runtime_discussion(discussion.id, admin)
 
@@ -1405,6 +1405,8 @@ class TagRealtimeIntegrationTests(TestCase):
         self.assertEqual(discussion_id, self.discussion.id)
         self.assertEqual(event_type, "post.hidden")
         self.assertEqual(payload, {})
+
+
 
 
 
