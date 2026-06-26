@@ -4,7 +4,7 @@ import {
 import { getEmptyState,
   getStateBlock,
   getUiCopy
-} from '@bias/forum'
+} from '@bias/core/forum'
 import { resolveTagsMetaPayload } from './tagsMeta.js'
 
 export function createTagsMetaState({

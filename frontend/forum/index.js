@@ -5,7 +5,7 @@ import {
 } from '@bias/core'
 import { extendForum,
   getUiCopy
-} from '@bias/forum'
+} from '@bias/core/forum'
 import { buildDiscussionHeroColorStyle } from '@bias/discussions'
 import DiscussionTagLabels from './DiscussionTagLabels.vue'
 import DiscussionTaggedPostItem from './DiscussionTaggedPostItem.vue'

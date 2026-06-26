@@ -45,7 +45,7 @@ import {
   ForumStateBlock,
   useComposerStore,
   useForumStore
-} from '@bias/forum'
+} from '@bias/core/forum'
 import { DiscussionListSidebarStartButton } from '@bias/discussions'
 import TagCloud from './TagCloud.vue'
 import TagTile from './TagTile.vue'

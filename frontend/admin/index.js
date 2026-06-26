@@ -1,4 +1,4 @@
-import { extendAdmin } from '@bias/admin'
+import { extendAdmin } from '@bias/core/admin'
 import TagsPage from './TagsPage.vue'
 import { buildTagsPageExtender } from './tagsPageBootstrap.js'
 

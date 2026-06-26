@@ -396,7 +396,7 @@ import {
   getAdminPageConfig,
   getAdminPageCopy,
   useModalStore,
-} from '@bias/admin/components'
+} from '@bias/core/components/admin'
 
 const PAGE_KEY = 'tags.index'
 const DEFAULT_COLOR_PRESETS = [

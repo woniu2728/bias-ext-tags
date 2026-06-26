@@ -39,7 +39,7 @@ import {
   computed,
   formatRelativeTime } from '@bias/core'
 import { getEmptyState
-} from '@bias/forum'
+} from '@bias/core/forum'
 import { buildDiscussionPath } from '@bias/discussions'
 import TagBadge from './TagBadge.vue'
 import { buildTagPath } from './tagUtils.js'

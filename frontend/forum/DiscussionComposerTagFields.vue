@@ -35,7 +35,7 @@ import {
   computed,
   ref } from '@bias/core'
 import { getUiCopy
-} from '@bias/forum'
+} from '@bias/core/forum'
 import { flattenTags, normalizeTag, unwrapTagList } from './tagUtils.js'
 
 const props = defineProps({

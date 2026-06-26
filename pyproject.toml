@@ -4,6 +4,15 @@ version = "0.1.0"
 dependencies = ["bias-core>=0.1,<0.2"]
 [project.entry-points."bias.extensions"]
 tags = "bias_ext_tags.backend.ext:extend"
+[tool.setuptools]
+include-package-data = true
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["bias_ext_tags*"]
+
+[tool.setuptools.data-files]
+"bias_extensions/tags" = ["extension.json"]
+"bias_extensions/tags/frontend/admin" = ["frontend/admin/index.js", "frontend/admin/TagsPage.vue", "frontend/admin/tagsPageBootstrap.js"]
+"bias_extensions/tags/frontend/forum" = ["frontend/forum/DiscussionComposerTagFields.vue", "frontend/forum/discussionListNavigation.js", "frontend/forum/discussionListNavigation.test.js", "frontend/forum/DiscussionSidebarTagsSection.vue", "frontend/forum/DiscussionTaggedPostItem.vue", "frontend/forum/DiscussionTagLabels.vue", "frontend/forum/index.js", "frontend/forum/nodeSdk.js", "frontend/forum/sdk.js", "frontend/forum/TagBadge.vue", "frontend/forum/TagCloud.vue", "frontend/forum/TagDiscussionModal.vue", "frontend/forum/tagModel.js", "frontend/forum/tagsMeta.js", "frontend/forum/tagsMeta.test.js", "frontend/forum/TagsView.vue", "frontend/forum/TagTile.vue", "frontend/forum/tagUtils.js", "frontend/forum/useTagsLoadState.js", "frontend/forum/useTagsLoadState.test.js", "frontend/forum/useTagsMetaState.js", "frontend/forum/useTagsMetaState.test.js", "frontend/forum/useTagsPage.js", "frontend/forum/useTagsPageLifecycle.js", "frontend/forum/useTagsPageLifecycle.test.js", "frontend/forum/useTagsRealtimeState.js", "frontend/forum/useTagsRealtimeState.test.js", "frontend/forum/useTagsResourceState.js", "frontend/forum/useTagsResourceState.test.js", "frontend/forum/useTagsViewBindings.js", "frontend/forum/useTagsViewBindings.test.js", "frontend/forum/useTagsViewModel.js"]
+

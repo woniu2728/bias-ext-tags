@@ -81,7 +81,7 @@ import {
 } from '@bias/core'
 import {
   getUiCopy
-} from '@bias/forum'
+} from '@bias/core/forum'
 import { normalizeDiscussion } from '@bias/discussions'
 import { flattenTags, normalizeTag, unwrapTagList } from './tagUtils.js'
 
