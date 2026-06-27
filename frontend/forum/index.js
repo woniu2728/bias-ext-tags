@@ -501,7 +501,7 @@ function registerTagsForum(forum) {
     order: 479,
     surfaces: ['discussion-list-sidebar-tags-link'],
     resolve: () => ({
-      text: '标签',
+      text: '全部标签',
     }),
   })
 
@@ -744,7 +744,19 @@ function buildTagsSidebarContextData({
 
 function getTagsSidebarContextData(context = {}) {
   const data = context.discussionListContextData || {}
-  return data['tag-filter'] || data['tag-sidebar-resources'] || buildTagsSidebarContextData()
+  const contextData = data['tag-filter'] || data['tag-sidebar-resources']
+  if (contextData) {
+    return contextData
+  }
+
+  const forumTags = context.forumStore?.settings?.tags
+  if (Array.isArray(forumTags) && forumTags.length > 0) {
+    return buildTagsSidebarContextData({
+      tags: forumTags,
+    })
+  }
+
+  return buildTagsSidebarContextData()
 }
 
 async function handleEditDiscussionTags({

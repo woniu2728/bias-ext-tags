@@ -7,6 +7,10 @@
   >
     <div class="TagsPage-content">
       <AdminToolbar align="end">
+        <button type="button" class="Button Button--primary" @click="openCreatePrimaryModal">
+          <i class="fas fa-plus"></i>
+          {{ tagsCopy?.createPrimaryLabel || '创建顶级标签' }}
+        </button>
         <button type="button" class="Button" :disabled="refreshingStats" @click="refreshTagStats">
           <i class="fas fa-sync-alt" :class="{ 'fa-spin': refreshingStats }"></i>
           {{ refreshingStats ? (tagsCopy?.refreshingLabel || '刷新中...') : (tagsCopy?.refreshLabel || '刷新统计') }}
