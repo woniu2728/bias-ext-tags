@@ -21,5 +21,8 @@
   "extra": {
     "auto_install": true,
     "auto_enable": true
+  },
+  "security": {
+    "capabilities_notice": "Taxonomy extension; owns tag records and controls tag visibility, assignment, and navigation surfaces."
   }
 }
