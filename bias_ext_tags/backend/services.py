@@ -1,7 +1,8 @@
 import uuid
 from typing import Any, Optional, List
 from django.db import transaction
-from django.db.models import Q, QuerySet
+from django.db.models import Count, F, Q, QuerySet, Window
+from django.db.models.functions import RowNumber
 from django.core.exceptions import PermissionDenied
 from django.utils import timezone
 from django.utils.text import slugify
@@ -989,16 +990,45 @@ class TagService:
         if tag_ids is not None:
             queryset = queryset.filter(id__in=tag_ids)
 
-        for tag in queryset:
-            discussion_links = apply_runtime_counted_discussion_filter(
-                DiscussionTag.objects.filter(tag=tag),
-                prefix="discussion",
-            ).select_related('discussion').order_by('-discussion__last_posted_at', '-discussion__id')
+        tags = list(queryset)
+        if not tags:
+            return
 
-            latest_link = discussion_links.first()
-            Tag.objects.filter(id=tag.id).update(
-                discussion_count=discussion_links.count(),
-                last_posted_at=latest_link.discussion.last_posted_at if latest_link else None,
-                last_posted_discussion=latest_link.discussion if latest_link else None,
+        target_tag_ids = [tag.id for tag in tags]
+        counted_links = apply_runtime_counted_discussion_filter(
+            DiscussionTag.objects.filter(tag_id__in=target_tag_ids),
+            prefix="discussion",
+        )
+        discussion_counts = {
+            item["tag_id"]: item["discussion_count"]
+            for item in counted_links.values("tag_id").annotate(discussion_count=Count("discussion_id"))
+        }
+        latest_discussions = {
+            item["tag_id"]: item
+            for item in counted_links.annotate(
+                row_number=Window(
+                    expression=RowNumber(),
+                    partition_by=[F("tag_id")],
+                    order_by=[
+                        F("discussion__last_posted_at").desc(nulls_last=True),
+                        F("discussion_id").desc(),
+                    ],
+                )
+            ).filter(row_number=1).values(
+                "tag_id",
+                "discussion_id",
+                "discussion__last_posted_at",
             )
+        }
+
+        for tag in tags:
+            latest_discussion = latest_discussions.get(tag.id)
+            tag.discussion_count = int(discussion_counts.get(tag.id) or 0)
+            tag.last_posted_at = latest_discussion["discussion__last_posted_at"] if latest_discussion else None
+            tag.last_posted_discussion_id = latest_discussion["discussion_id"] if latest_discussion else None
+
+        Tag.objects.bulk_update(
+            tags,
+            ["discussion_count", "last_posted_at", "last_posted_discussion"],
+        )
 

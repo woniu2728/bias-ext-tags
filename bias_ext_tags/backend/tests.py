@@ -279,6 +279,53 @@ class TagStatsTests(TestCase):
         self.assertEqual(self.tag.discussion_count, 1)
         self.assertIn("已刷新全部标签统计", stdout.getvalue())
 
+    def test_refresh_tag_stats_batches_counts_and_latest_discussions(self):
+        tags = [
+            Tag.objects.create(name=f"批量标签 {index}", slug=f"batch-tag-{index}")
+            for index in range(6)
+        ]
+        discussions_by_tag = {}
+        for index, tag in enumerate(tags):
+            first = create_runtime_discussion(
+                title=f"Batch discussion {index} older",
+                content="Older discussion",
+                user=self.user,
+            )
+            second = create_runtime_discussion(
+                title=f"Batch discussion {index} newer",
+                content="Newer discussion",
+                user=self.user,
+            )
+            DiscussionTag.objects.create(discussion=first, tag=tag)
+            DiscussionTag.objects.create(discussion=second, tag=tag)
+            discussions_by_tag[tag.id] = second
+
+        Tag.objects.filter(id__in=[tag.id for tag in tags]).update(
+            discussion_count=0,
+            last_posted_discussion=None,
+            last_posted_at=None,
+        )
+
+        with CaptureQueriesContext(connection) as queries:
+            TagService.refresh_tag_stats([tag.id for tag in tags])
+
+        for tag in tags:
+            tag.refresh_from_db()
+            self.assertEqual(tag.discussion_count, 2)
+            self.assertEqual(tag.last_posted_discussion_id, discussions_by_tag[tag.id].id)
+
+        per_tag_link_queries = [
+            query["sql"]
+            for query in queries
+            if 'from "discussion_tag"' in query["sql"].lower()
+            and 'where "discussion_tag"."tag_id" =' in query["sql"].lower()
+        ]
+        self.assertEqual(
+            per_tag_link_queries,
+            [],
+            "Refreshing tag stats should batch discussion_tag aggregation instead of querying once per tag.",
+        )
+
     @override_settings(CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}})
     def test_dispatch_refresh_tag_stats_queues_when_enabled(self):
         from bias_ext_tags.backend.tasks import refresh_tag_stats_task
@@ -843,6 +890,17 @@ class TagForumSettingsTests(TestCase):
             child_discussion_fetches,
             [],
             "Forum tag tree should not issue per-child last_posted_discussion lookups.",
+        )
+        child_parent_fetches = [
+            query["sql"]
+            for query in queries
+            if 'from "tags"' in query["sql"].lower()
+            and 'where "tags"."id" =' in query["sql"].lower()
+        ]
+        self.assertEqual(
+            child_parent_fetches,
+            [],
+            "Forum tag tree should not issue per-child parent tag lookups while resolving permissions.",
         )
 
 
