@@ -798,6 +798,53 @@ class TagForumSettingsTests(TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         self.assertTrue(response.json()["can_bypass_tag_counts"])
 
+    def test_forum_tag_tree_prefetches_child_last_posted_discussions(self):
+        permission_group = Group.objects.create(name="ForumTagTreePosting", color="#4d698e")
+        Permission.objects.create(group=permission_group, permission="startDiscussion")
+        Permission.objects.create(group=permission_group, permission="startDiscussionWithoutApproval")
+        self.member.user_groups.add(permission_group)
+        parent = Tag.objects.create(name="Forum Parent", slug="forum-parent")
+        children = [
+            Tag.objects.create(
+                name=f"Forum Child {index}",
+                slug=f"forum-child-{index}",
+                parent=parent,
+                position=index,
+            )
+            for index in range(6)
+        ]
+        for tag in (parent, *children):
+            Permission.objects.create(group=permission_group, permission=f"tag{tag.id}.startDiscussion")
+        for child in children:
+            with self.captureOnCommitCallbacks(execute=True):
+                create_runtime_discussion(
+                    title=f"Child discussion {child.id}",
+                    content="Forum child last posted discussion.",
+                    user=self.member,
+                    extension_payload=discussion_tags_payload([parent.id, child.id]),
+                )
+
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get("/api/forum", **self.auth_header(self.member))
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload_parent = next(item for item in response.json()["tags"] if item["slug"] == parent.slug)
+        self.assertEqual(len(payload_parent["children"]), len(children))
+        self.assertTrue(
+            all(child["last_posted_discussion"] for child in payload_parent["children"])
+        )
+        child_discussion_fetches = [
+            query["sql"]
+            for query in queries
+            if 'from "discussions"' in query["sql"].lower()
+            and 'where "discussions"."id" =' in query["sql"].lower()
+        ]
+        self.assertEqual(
+            child_discussion_fetches,
+            [],
+            "Forum tag tree should not issue per-child last_posted_discussion lookups.",
+        )
+
 
 class TagSearchApiTests(ExtensionRuntimeTestMixin, TestCase):
     def setUp(self):

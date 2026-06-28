@@ -283,7 +283,7 @@ def resolve_forum_tags(forum, context: dict) -> list[dict]:
 
     user = context.get("user")
     child_queryset = filter_runtime_tags_for_user(
-        Tag.objects.filter(is_hidden=False).order_by("position", "name"),
+        Tag.objects.filter(is_hidden=False).select_related("last_posted_discussion").order_by("position", "name"),
         user,
         action="view",
     )
