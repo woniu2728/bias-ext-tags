@@ -1351,6 +1351,43 @@ class TagSearchApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(payload["discussion_total"], 1)
         self.assertEqual([item["id"] for item in payload["discussions"]], [matched.id])
 
+    def test_search_api_tag_filter_supports_comma_or_slugs(self):
+        first_tag = Tag.objects.create(name="搜索标签一", slug="search-filter-one")
+        second_tag = Tag.objects.create(name="搜索标签二", slug="search-filter-two")
+        other_tag = Tag.objects.create(name="搜索标签三", slug="search-filter-three")
+        first_discussion = create_runtime_discussion(
+            title="批量标签搜索命中一",
+            content="shared-filter-keyword",
+            user=self.user,
+            extension_payload=discussion_tags_payload([first_tag.id]),
+        )
+        second_discussion = create_runtime_discussion(
+            title="批量标签搜索命中二",
+            content="shared-filter-keyword",
+            user=self.user,
+            extension_payload=discussion_tags_payload([second_tag.id]),
+        )
+        create_runtime_discussion(
+            title="批量标签搜索未命中",
+            content="shared-filter-keyword",
+            user=self.user,
+            extension_payload=discussion_tags_payload([other_tag.id]),
+        )
+
+        response = self.client.get(
+            "/api/search",
+            {"q": "shared-filter-keyword tag:search-filter-one,search-filter-two", "type": "discussions"},
+            **self.auth_header(),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertEqual(payload["discussion_total"], 2)
+        self.assertEqual(
+            {item["id"] for item in payload["discussions"]},
+            {first_discussion.id, second_discussion.id},
+        )
+
     def test_search_filters_api_exposes_registered_tag_filter_syntax(self):
         response = self.client.get("/api/search/filters", {"target": "discussions"})
 
@@ -1472,6 +1509,105 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(len(payload["data"]), 1)
         self.assertEqual(payload["data"][0]["id"], life_discussion.id)
         self.assertEqual(payload["data"][0]["tags"][0]["slug"], life_tag.slug)
+
+    def test_discussion_list_tag_filter_supports_comma_or_slugs(self):
+        first_tag = Tag.objects.create(name="列表标签一", slug="list-filter-one")
+        second_tag = Tag.objects.create(name="列表标签二", slug="list-filter-two")
+        other_tag = Tag.objects.create(name="列表标签三", slug="list-filter-three")
+        first_discussion = create_runtime_discussion(
+            title="列表标签命中一",
+            content="按多个标签筛选。",
+            user=self.author,
+            extension_payload=discussion_tags_payload([first_tag.id]),
+        )
+        second_discussion = create_runtime_discussion(
+            title="列表标签命中二",
+            content="按多个标签筛选。",
+            user=self.author,
+            extension_payload=discussion_tags_payload([second_tag.id]),
+        )
+        create_runtime_discussion(
+            title="列表标签未命中",
+            content="按多个标签筛选。",
+            user=self.author,
+            extension_payload=discussion_tags_payload([other_tag.id]),
+        )
+
+        response = self.client.get("/api/discussions/", {"tag": "list-filter-one,list-filter-two"})
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertEqual(payload["total"], 2)
+        self.assertEqual(
+            {item["id"] for item in payload["data"]},
+            {first_discussion.id, second_discussion.id},
+        )
+
+    def test_discussion_list_tag_filter_resolves_multiple_slugs_with_one_lookup(self):
+        tags = [
+            Tag.objects.create(name=f"查询标签 {index}", slug=f"query-filter-{index}")
+            for index in range(3)
+        ]
+        for tag in tags:
+            create_runtime_discussion(
+                title=f"查询标签讨论 {tag.id}",
+                content="用于查询数量防线。",
+                user=self.author,
+                extension_payload=discussion_tags_payload([tag.id]),
+            )
+
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get(
+                "/api/discussions/",
+                {"tag": "query-filter-0,query-filter-1,query-filter-2"},
+            )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        slug_resolution_queries = [
+            query["sql"]
+            for query in queries
+            if 'from "tags"' in query["sql"].lower()
+            and '"slug" in' in query["sql"].lower()
+        ]
+        self.assertEqual(
+            len(slug_resolution_queries),
+            1,
+            f"Expected one batched slug lookup, got {len(slug_resolution_queries)}: {slug_resolution_queries}",
+        )
+
+    def test_discussion_list_tag_filter_unknown_slug_returns_empty_result(self):
+        Tag.objects.create(name="存在标签", slug="known-filter-tag")
+        create_runtime_discussion(
+            title="不会被未知标签命中",
+            content="未知标签应返回空列表。",
+            user=self.author,
+        )
+
+        response = self.client.get("/api/discussions/", {"tag": "missing-filter-tag"})
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["total"], 0)
+        self.assertEqual(response.json()["data"], [])
+
+    def test_discussion_list_tag_filter_supports_untagged(self):
+        tagged = Tag.objects.create(name="已标记", slug="tagged-filter")
+        create_runtime_discussion(
+            title="已标记讨论",
+            content="不应出现在 untagged 过滤中。",
+            user=self.author,
+            extension_payload=discussion_tags_payload([tagged.id]),
+        )
+        untagged_discussion = create_runtime_discussion(
+            title="未标记讨论",
+            content="应出现在 untagged 过滤中。",
+            user=self.author,
+        )
+
+        response = self.client.get("/api/discussions/", {"tag": "untagged"})
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["total"], 1)
+        self.assertEqual(response.json()["data"][0]["id"], untagged_discussion.id)
 
     def test_all_discussions_list_hides_discussions_in_hidden_tags_by_default(self):
         public_tag = Tag.objects.create(name="公开", slug="public-list")
