@@ -39,6 +39,11 @@ class TagService:
         "start_discussion": "startDiscussion",
         "reply": "discussion.reply",
     }
+    TAG_MANAGEMENT_PERMISSION_MESSAGES = {
+        "tag.create": "没有权限创建标签",
+        "tag.edit": "没有权限编辑标签",
+        "tag.delete": "没有权限删除标签",
+    }
 
     ACCESS_SCOPE_LABELS = {
         Tag.ACCESS_PUBLIC: "所有人",
@@ -57,6 +62,15 @@ class TagService:
         if normalized not in TagService.ACCESS_SCOPE_LABELS:
             raise ValueError("无效的标签访问级别")
         return normalized
+
+    @staticmethod
+    def can_manage_tags(user: Optional[Any], permission: str) -> bool:
+        return has_runtime_forum_permission(user, permission)
+
+    @staticmethod
+    def ensure_can_manage_tags(user: Optional[Any], permission: str, message: Optional[str] = None) -> None:
+        if not TagService.can_manage_tags(user, permission):
+            raise PermissionDenied(message or TagService.TAG_MANAGEMENT_PERMISSION_MESSAGES.get(permission, "无权限管理标签"))
 
     @staticmethod
     def has_scope_access(user: Optional[Any], scope: str) -> bool:
@@ -513,9 +527,7 @@ class TagService:
             PermissionDenied: 权限不足
             ValueError: 参数错误
         """
-        # 权限检查
-        if user and not user.is_staff:
-            raise PermissionDenied("只有管理员可以创建标签")
+        TagService.ensure_can_manage_tags(user, "tag.create")
 
         # 检查父标签
         parent = None
@@ -693,9 +705,7 @@ class TagService:
             PermissionDenied: 权限不足
             ValueError: 参数错误
         """
-        # 权限检查
-        if not user.is_staff:
-            raise PermissionDenied("只有管理员可以编辑标签")
+        TagService.ensure_can_manage_tags(user, "tag.edit")
 
         tag = Tag.objects.get(id=tag_id)
         was_restricted = bool(tag.is_restricted)
@@ -773,8 +783,7 @@ class TagService:
 
     @staticmethod
     def move_tag(tag_id: int, direction: str, user: Any) -> bool:
-        if not user.is_staff:
-            raise PermissionDenied("只有管理员可以调整标签排序")
+        TagService.ensure_can_manage_tags(user, "tag.edit", "没有权限调整标签排序")
 
         if direction not in {"up", "down"}:
             raise ValueError("无效的排序方向")
@@ -807,8 +816,7 @@ class TagService:
 
     @staticmethod
     def order_tags(order: List[dict], user: Any) -> List[Tag]:
-        if not user.is_staff:
-            raise PermissionDenied("只有管理员可以调整标签排序")
+        TagService.ensure_can_manage_tags(user, "tag.edit", "没有权限调整标签排序")
         if not isinstance(order, list):
             raise ValueError("标签排序数据必须是数组")
 
@@ -924,9 +932,7 @@ class TagService:
             PermissionDenied: 权限不足
             ValueError: 参数错误
         """
-        # 权限检查
-        if not user.is_staff:
-            raise PermissionDenied("只有管理员可以删除标签")
+        TagService.ensure_can_manage_tags(user, "tag.delete")
 
         tag = Tag.objects.get(id=tag_id)
 

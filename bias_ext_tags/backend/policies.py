@@ -43,6 +43,24 @@ class PostPolicy(AuthorizationPolicy):
 
 
 class TagPolicy(AuthorizationPolicy):
+    def create(self, user, model, **context):
+        return TagService.can_manage_tags(user, "tag.create")
+
+    def create_tag(self, user, model, **context):
+        return self.create(user, model, **context)
+
+    def edit(self, user, model, **context):
+        return TagService.can_manage_tags(user, "tag.edit")
+
+    def delete(self, user, model, **context):
+        return TagService.can_manage_tags(user, "tag.delete")
+
+    def move(self, user, model, **context):
+        return self.edit(user, model, **context)
+
+    def order(self, user, model, **context):
+        return self.edit(user, model, **context)
+
     def view(self, user, model, **context):
         return TagService.can_view_tag(model, user)
 

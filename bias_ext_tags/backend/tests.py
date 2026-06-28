@@ -2,6 +2,7 @@ import json
 import re
 from pathlib import Path
 
+from django.core.exceptions import PermissionDenied
 from django.core.management import call_command
 from django.db import connection
 from django.test import TestCase, override_settings
@@ -195,6 +196,47 @@ class TagsExtensionRuntimeTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertTrue(has_forum_permission(staff, "tag.edit"))
         self.assertTrue(has_forum_permission(staff, "tag.delete"))
         self.assertFalse(has_forum_permission(member, "tag.create"))
+
+    def test_tag_management_policy_uses_forum_permissions(self):
+        from bias_core.authorization import can
+
+        self.bootstrap_extensions("tags")
+        member = User.objects.create_user(
+            username="tag-policy-member",
+            email="tag-policy-member@example.com",
+            password="password123",
+        )
+        group = Group.objects.create(name="TagPolicyManagers", color="#4d698e")
+        member.user_groups.add(group)
+        tag = Tag.objects.create(name="策略标签", slug="policy-tag")
+
+        self.assertFalse(can(member, "edit", tag))
+        Permission.objects.create(group=group, permission="tag.edit")
+        if hasattr(member, "_forum_permission_cache"):
+            delattr(member, "_forum_permission_cache")
+
+        self.assertTrue(can(member, "edit", tag))
+        self.assertTrue(can(member, "move", tag))
+
+    def test_tag_service_management_checks_use_forum_permissions(self):
+        self.bootstrap_extensions("tags")
+        member = User.objects.create_user(
+            username="tag-service-member",
+            email="tag-service-member@example.com",
+            password="password123",
+        )
+        group = Group.objects.create(name="TagServiceManagers", color="#4d698e")
+        member.user_groups.add(group)
+
+        with self.assertRaises(PermissionDenied):
+            TagService.create_tag(name="未授权创建", slug="service-denied", user=member)
+
+        Permission.objects.create(group=group, permission="tag.create")
+        if hasattr(member, "_forum_permission_cache"):
+            delattr(member, "_forum_permission_cache")
+
+        tag = TagService.create_tag(name="授权创建", slug="service-allowed", user=member)
+        self.assertEqual(tag.slug, "service-allowed")
 
     def test_tags_posts_integration_is_optional(self):
         self.disable_extension_for_test("posts")
@@ -924,6 +966,41 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
 
         self.assertEqual(update_response.status_code, 200, update_response.content)
         self.assertEqual(update_response.json()["name"], "资源端点标签更新")
+        self.assertEqual(delete_response.status_code, 200, delete_response.content)
+        self.assertFalse(Tag.objects.filter(id=tag_id).exists())
+
+    def test_member_with_tag_management_permissions_can_use_resource_endpoints(self):
+        group = Group.objects.create(name="ResourceTagManagers", color="#4d698e")
+        Permission.objects.create(group=group, permission="tag.create")
+        Permission.objects.create(group=group, permission="tag.edit")
+        Permission.objects.create(group=group, permission="tag.delete")
+        self.member.user_groups.add(group)
+        if hasattr(self.member, "_forum_permission_cache"):
+            delattr(self.member, "_forum_permission_cache")
+
+        create_response = self.client.post(
+            "/api/tags",
+            data=json.dumps({"name": "成员授权标签", "slug": "member-managed-tag"}),
+            content_type="application/json",
+            **self.auth_header(self.member),
+        )
+
+        self.assertEqual(create_response.status_code, 200, create_response.content)
+        tag_id = create_response.json()["id"]
+
+        update_response = self.client.patch(
+            f"/api/tags/{tag_id}",
+            data=json.dumps({"name": "成员授权标签更新"}),
+            content_type="application/json",
+            **self.auth_header(self.member),
+        )
+        delete_response = self.client.delete(
+            f"/api/tags/{tag_id}",
+            **self.auth_header(self.member),
+        )
+
+        self.assertEqual(update_response.status_code, 200, update_response.content)
+        self.assertEqual(update_response.json()["name"], "成员授权标签更新")
         self.assertEqual(delete_response.status_code, 200, delete_response.content)
         self.assertFalse(Tag.objects.filter(id=tag_id).exists())
 
