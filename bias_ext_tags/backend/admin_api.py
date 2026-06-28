@@ -60,7 +60,7 @@ def normalize_tag_position(payload, parent_id=None, current_tag: Tag = None) -> 
     if "position" in payload and payload.get("position") is not None:
         return int(payload["position"])
 
-    queryset = Tag.objects.filter(parent_id=parent_id, position__isnull=False)
+    queryset = Tag.objects.filter(parent_id=parent_id, is_primary=True, position__isnull=False)
     if current_tag is not None:
         queryset = queryset.exclude(id=current_tag.id)
     return (queryset.aggregate(max_position=Max("position")).get("max_position") or 0) + 1

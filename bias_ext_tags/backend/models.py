@@ -23,6 +23,7 @@ class Tag(models.Model):
     icon = models.CharField(max_length=100, blank=True)
     background_url = models.URLField(max_length=500, blank=True)
     position = models.IntegerField(null=True, blank=True, default=0)
+    is_primary = models.BooleanField(default=True)
     parent = models.ForeignKey(
         "self",
         on_delete=models.SET_NULL,
@@ -55,6 +56,7 @@ class Tag(models.Model):
             models.Index(fields=["parent"], name="tags_parent__7fcc39_idx"),
             models.Index(fields=["parent", "position", "name"], name="tags_parent_pos_name_idx"),
             models.Index(fields=["position", "parent"], name="tags_position_parent_idx"),
+            models.Index(fields=["is_primary", "parent", "position"], name="tags_primary_parent_pos_idx"),
         ]
 
     def __str__(self):

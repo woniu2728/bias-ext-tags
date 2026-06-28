@@ -72,15 +72,15 @@ class TagService:
 
     @staticmethod
     def primary_tag_filter(prefix: str = ""):
-        return Q(**{f"{prefix}position__isnull": False, f"{prefix}parent_id__isnull": True})
+        return Q(**{f"{prefix}is_primary": True, f"{prefix}parent_id__isnull": True})
 
     @staticmethod
     def secondary_tag_filter(prefix: str = ""):
-        return Q(**{f"{prefix}position__isnull": True, f"{prefix}parent_id__isnull": True})
+        return Q(**{f"{prefix}is_primary": False, f"{prefix}parent_id__isnull": True})
 
     @staticmethod
     def is_primary_tag(tag: Optional[Tag]) -> bool:
-        return bool(tag and tag.parent_id is None and tag.position is not None)
+        return bool(tag and tag.parent_id is None and tag.is_primary)
 
     @staticmethod
     def is_child_tag(tag: Optional[Tag]) -> bool:
@@ -102,10 +102,23 @@ class TagService:
 
     @staticmethod
     def _next_position(parent_id: Optional[int], *, exclude_tag_id: Optional[int] = None) -> int:
-        queryset = Tag.objects.filter(parent_id=parent_id, position__isnull=False)
+        queryset = Tag.objects.filter(parent_id=parent_id, is_primary=True, position__isnull=False)
         if exclude_tag_id is not None:
             queryset = queryset.exclude(id=exclude_tag_id)
         return (queryset.aggregate(max_position=Max("position")).get("max_position") or 0) + 1
+
+    @staticmethod
+    def _normalize_structure_state(tag: Tag) -> None:
+        if tag.parent_id is not None:
+            tag.is_primary = True
+            if tag.position is None:
+                tag.position = TagService._next_position(tag.parent_id, exclude_tag_id=tag.id)
+            return
+
+        if not tag.is_primary:
+            tag.position = None
+        elif tag.position is None:
+            tag.position = TagService._next_position(None, exclude_tag_id=tag.id)
 
     @staticmethod
     def _settings_int(settings: dict, key: str, default: int = 0) -> int:
@@ -720,14 +733,18 @@ class TagService:
 
         with transaction.atomic():
             if parent is not None:
+                normalized_is_primary = True
                 normalized_position = position
                 if normalized_position is None:
                     normalized_position = TagService._next_position(parent.id)
             elif is_primary is False:
+                normalized_is_primary = False
                 normalized_position = None
             elif position is None:
+                normalized_is_primary = True
                 normalized_position = TagService._next_position(None)
             else:
+                normalized_is_primary = True
                 normalized_position = position
 
             tag = Tag.objects.create(
@@ -738,6 +755,7 @@ class TagService:
                 icon=icon,
                 background_url=background_url,
                 position=normalized_position,
+                is_primary=normalized_is_primary,
                 parent=parent,
                 is_hidden=is_hidden,
                 is_restricted=is_restricted,
@@ -745,7 +763,6 @@ class TagService:
                 start_discussion_scope=normalized_start,
                 reply_scope=normalized_reply,
             )
-
             return tag
 
     @staticmethod
@@ -933,20 +950,29 @@ class TagService:
                 if tag.parent_id is not None:
                     if not is_primary:
                         raise ValueError("子标签不能设置为次级标签")
+                    tag.is_primary = True
                     if position is None and tag.position is None:
                         tag.position = TagService._next_position(tag.parent_id, exclude_tag_id=tag.id)
                 elif is_primary:
+                    tag.is_primary = True
                     if position is None and tag.position is None:
                         tag.position = TagService._next_position(None, exclude_tag_id=tag.id)
                 else:
                     if tag.children.exists():
                         raise ValueError("已有子标签的标签不能设置为次级标签")
+                    tag.is_primary = False
                     tag.position = None
 
             if position is not None:
                 tag.position = position
+                tag.is_primary = True
             elif parent_id is not _UNSET and tag.parent_id is not None and tag.position is None:
                 tag.position = TagService._next_position(tag.parent_id, exclude_tag_id=tag.id)
+                tag.is_primary = True
+            elif parent_id is not _UNSET and tag.parent_id is None and tag.position is None and is_primary is None:
+                tag.is_primary = False
+
+            TagService._normalize_structure_state(tag)
 
             if is_hidden is not None:
                 tag.is_hidden = is_hidden
@@ -994,7 +1020,7 @@ class TagService:
 
         with transaction.atomic():
             siblings = list(
-                Tag.objects.filter(parent_id=tag.parent_id, position__isnull=False).order_by(
+                Tag.objects.filter(parent_id=tag.parent_id, is_primary=True, position__isnull=False).order_by(
                     *TagService.structure_order_by(include_id=True)
                 )
             )
@@ -1072,14 +1098,15 @@ class TagService:
                 TagService.validate_parent_assignment(tag, parent)
 
         with transaction.atomic():
-            Tag.objects.update(parent=None, position=None)
+            Tag.objects.update(parent=None, position=None, is_primary=False)
             for tag_id, parent_id, position in flattened:
                 tag = tags_by_id[tag_id]
                 parent = tags_by_id[parent_id] if parent_id is not None else None
                 tag.parent = parent
                 tag.position = position
+                tag.is_primary = True
 
-            Tag.objects.bulk_update(tags_by_id.values(), ["parent_id", "position"])
+            Tag.objects.bulk_update(tags_by_id.values(), ["parent_id", "position", "is_primary"])
 
         return list(Tag.objects.select_related("parent").all().order_by(*TagService.structure_order_by(include_id=True)))
 
@@ -1098,7 +1125,7 @@ class TagService:
         parent_ids = [None, *Tag.objects.exclude(parent_id__isnull=True).values_list("parent_id", flat=True).distinct()]
         for parent_id in parent_ids:
             siblings = list(
-                Tag.objects.filter(parent_id=parent_id, position__isnull=False).order_by(
+                Tag.objects.filter(parent_id=parent_id, is_primary=True, position__isnull=False).order_by(
                     *TagService.structure_order_by(include_id=True)
                 )
             )
