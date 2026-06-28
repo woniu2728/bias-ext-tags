@@ -1487,7 +1487,7 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(response.status_code, 403, response.content)
         self.assertIn("没有权限", response.json()["error"])
 
-    def test_update_discussion_dispatches_tag_stats_refresh_request_event(self):
+    def test_update_discussion_tags_adjusts_tag_stats_without_refresh_event(self):
         tag_a = Tag.objects.create(name="标签A", slug="tag-a", color="#3498db")
         tag_b = Tag.objects.create(name="标签B", slug="tag-b", color="#2ecc71")
         discussion = create_runtime_discussion(
@@ -1496,20 +1496,66 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
             user=self.author,
             extension_payload=discussion_tags_payload([tag_a.id]),
         )
+        newer_discussion = create_runtime_discussion(
+            title="Newer tag A discussion",
+            content="Keeps tag A latest after retag",
+            user=self.author,
+            extension_payload=discussion_tags_payload([tag_a.id]),
+        )
+        tag_a.refresh_from_db()
+        tag_b.refresh_from_db()
+        self.assertEqual(tag_a.discussion_count, 2)
+        self.assertEqual(tag_a.last_posted_discussion_id, newer_discussion.id)
+        self.assertEqual(tag_b.discussion_count, 0)
 
         events, dispatch_patch = capture_runtime_events()
-        with dispatch_patch:
-            with self.captureOnCommitCallbacks(execute=True):
-                update_runtime_discussion(
-                    discussion_id=discussion.id,
-                    user=self.author,
-                    extension_payload=discussion_tags_payload([tag_b.id]),
-                )
+        with patch("bias_ext_tags.backend.services.TagService.refresh_tag_stats") as refresh_tag_stats:
+            with dispatch_patch:
+                with self.captureOnCommitCallbacks(execute=True):
+                    update_runtime_discussion(
+                        discussion_id=discussion.id,
+                        user=self.author,
+                        extension_payload=discussion_tags_payload([tag_b.id]),
+                    )
 
-        tag_refresh_event = next(
-            event for event in events if isinstance(event, TagStatsRefreshRequestedEvent)
+        tag_a.refresh_from_db()
+        tag_b.refresh_from_db()
+        self.assertEqual(tag_a.discussion_count, 1)
+        self.assertEqual(tag_a.last_posted_discussion_id, newer_discussion.id)
+        self.assertEqual(tag_b.discussion_count, 1)
+        self.assertEqual(tag_b.last_posted_discussion_id, discussion.id)
+        refresh_tag_stats.assert_not_called()
+        self.assertFalse(any(isinstance(event, TagStatsRefreshRequestedEvent) for event in events))
+
+    def test_update_discussion_tags_refreshes_removed_latest_tag(self):
+        tag_a = Tag.objects.create(name="Latest标签A", slug="latest-tag-a", color="#3498db")
+        tag_b = Tag.objects.create(name="Latest标签B", slug="latest-tag-b", color="#2ecc71")
+        older_discussion = create_runtime_discussion(
+            title="Older latest tag discussion",
+            content="Older content",
+            user=self.author,
+            extension_payload=discussion_tags_payload([tag_a.id]),
         )
-        self.assertEqual(tag_refresh_event.tag_ids, tuple(sorted((tag_a.id, tag_b.id))))
+        latest_discussion = create_runtime_discussion(
+            title="Latest tag discussion",
+            content="Latest content",
+            user=self.author,
+            extension_payload=discussion_tags_payload([tag_a.id]),
+        )
+
+        with self.captureOnCommitCallbacks(execute=True):
+            update_runtime_discussion(
+                discussion_id=latest_discussion.id,
+                user=self.author,
+                extension_payload=discussion_tags_payload([tag_b.id]),
+            )
+
+        tag_a.refresh_from_db()
+        tag_b.refresh_from_db()
+        self.assertEqual(tag_a.discussion_count, 1)
+        self.assertEqual(tag_a.last_posted_discussion_id, older_discussion.id)
+        self.assertEqual(tag_b.discussion_count, 1)
+        self.assertEqual(tag_b.last_posted_discussion_id, latest_discussion.id)
 
     def test_update_discussion_dispatches_discussion_tagged_event_with_all_affected_tag_ids(self):
         parent_tag = Tag.objects.create(name="父标签", slug="parent-tag", color="#3498db")

@@ -28,6 +28,7 @@ from bias_ext_tags.backend.discussion_lifecycle import (
     apply_discussion_delete,
     apply_discussion_hidden,
     apply_discussion_rejected,
+    apply_discussion_update,
     prepare_discussion_delete,
 )
 from bias_ext_tags.backend.events import DiscussionTaggedEvent
@@ -189,6 +190,7 @@ def event_extenders():
         DiscussionLifecycleExtender().handler(
             "tags",
             apply_create=apply_discussion_create,
+            apply_update=apply_discussion_update,
             prepare_delete=prepare_discussion_delete,
             apply_delete=apply_discussion_delete,
             apply_hidden=apply_discussion_hidden,

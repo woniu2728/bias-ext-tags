@@ -1003,6 +1003,32 @@ class TagService:
             TagService.refresh_tag_stats(latest_tag_ids)
 
     @staticmethod
+    def adjust_tag_stats_for_discussion_tag_change(
+        discussion,
+        *,
+        added_tag_ids: List[int] | tuple[int, ...],
+        removed_tag_ids: List[int] | tuple[int, ...],
+    ) -> None:
+        removed_ids = sorted({int(tag_id) for tag_id in (removed_tag_ids or []) if tag_id})
+        added_ids = sorted({int(tag_id) for tag_id in (added_tag_ids or []) if tag_id})
+
+        if removed_ids:
+            Tag.objects.filter(id__in=removed_ids).update(
+                discussion_count=F("discussion_count") - 1,
+            )
+            latest_removed_ids = list(
+                Tag.objects.filter(
+                    id__in=removed_ids,
+                    last_posted_discussion_id=discussion.id,
+                ).values_list("id", flat=True)
+            )
+            if latest_removed_ids:
+                TagService.refresh_tag_stats(latest_removed_ids)
+
+        if added_ids:
+            TagService.increment_tag_stats_for_discussion(discussion, added_ids)
+
+    @staticmethod
     def dispatch_refresh_tag_stats(tag_ids: Optional[List[int]] = None) -> dict:
         normalized_tag_ids = None
         if tag_ids is not None:

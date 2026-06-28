@@ -73,12 +73,16 @@ def replace_discussion_tags(discussion, tags: Iterable) -> dict:
 
     current_tag_ids = tuple(tag.id for tag in normalized_tags)
     current_tag_names = tuple(tag.name for tag in sorted(normalized_tags, key=lambda item: item.name))
+    previous_tag_id_set = set(previous_tag_ids)
+    current_tag_id_set = set(current_tag_ids)
     return {
         "previous_tag_ids": previous_tag_ids,
         "previous_tag_names": previous_tag_names,
         "current_tag_ids": current_tag_ids,
         "current_tag_names": current_tag_names,
-        "affected_tag_ids": tuple(sorted(set(previous_tag_ids) | set(current_tag_ids))),
+        "affected_tag_ids": tuple(sorted(previous_tag_id_set | current_tag_id_set)),
+        "added_tag_ids": tuple(sorted(current_tag_id_set - previous_tag_id_set)),
+        "removed_tag_ids": tuple(sorted(previous_tag_id_set - current_tag_id_set)),
         "added_tags": tuple(name for name in current_tag_names if name not in previous_tag_names),
         "removed_tags": tuple(name for name in previous_tag_names if name not in current_tag_names),
     }

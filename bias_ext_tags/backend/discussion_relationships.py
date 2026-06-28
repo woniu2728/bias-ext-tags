@@ -5,7 +5,7 @@ from bias_core.extensions.runtime import (
     ensure_can_change_runtime_discussion_tags,
     ensure_can_start_discussion_in_runtime_tags,
 )
-from bias_ext_tags.backend.events import DiscussionTaggedEvent, TagStatsRefreshRequestedEvent
+from bias_ext_tags.backend.events import DiscussionTaggedEvent
 from bias_ext_tags.backend.tag_relationships import (
     get_discussion_tag_ids,
     get_discussion_tag_ids_for_stats,
@@ -29,6 +29,7 @@ def set_discussion_tags_relationship(discussion, value, context: dict | None = N
 
     result = replace_discussion_tags(discussion, tags)
     affected_tag_ids = tuple(result["affected_tag_ids"])
+    context["tags_relationship_result"] = result
 
     if not context.get("creating"):
         added_tags = tuple(result["added_tags"])
@@ -43,11 +44,6 @@ def set_discussion_tags_relationship(discussion, value, context: dict | None = N
                     tag_ids=affected_tag_ids,
                 )
             )
-
-    if affected_tag_ids and not context.get("creating"):
-        dispatch_forum_event_after_commit(
-            TagStatsRefreshRequestedEvent(tag_ids=affected_tag_ids)
-        )
 
 
 def _relationship_tag_ids(value) -> list[int]:

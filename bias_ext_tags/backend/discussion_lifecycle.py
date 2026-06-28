@@ -28,6 +28,29 @@ def apply_discussion_create(*, discussion, state: dict | None = None, context: d
     }
 
 
+def apply_discussion_update(*, discussion, state: dict | None = None, context: dict | None = None, **kwargs) -> dict:
+    relationship_result = dict((context or {}).get("tags_relationship_result") or {})
+    affected_tag_ids = tuple(relationship_result.get("affected_tag_ids") or ())
+    if not affected_tag_ids:
+        return {}
+
+    if (context or {}).get("was_counted") and (context or {}).get("is_counted"):
+        TagService.adjust_tag_stats_for_discussion_tag_change(
+            discussion,
+            added_tag_ids=relationship_result.get("added_tag_ids") or (),
+            removed_tag_ids=relationship_result.get("removed_tag_ids") or (),
+        )
+    else:
+        dispatch_forum_event_after_commit(
+            TagStatsRefreshRequestedEvent(tag_ids=affected_tag_ids)
+        )
+
+    return {
+        "discussion_id": discussion.id,
+        "affected_tag_ids": affected_tag_ids,
+    }
+
+
 def apply_discussion_delete(*, state: dict | None = None, context: dict | None = None, **kwargs) -> dict:
     tag_ids = tuple((state or {}).get("tag_ids") or ())
     if tag_ids:
