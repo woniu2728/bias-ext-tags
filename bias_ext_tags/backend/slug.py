@@ -15,21 +15,31 @@ class TagSlugDriver:
 
     def from_slug(self, slug: str, *, context: dict | None = None):
         from bias_ext_tags.backend.models import Tag
+        from bias_ext_tags.backend.services import TagService
 
         try:
-            return Tag.objects.get(slug=unquote(str(slug or "").strip()))
+            return TagService.filter_tags_for_user(
+                Tag.objects.all(),
+                (context or {}).get("user"),
+                action="view",
+            ).get(slug=unquote(str(slug or "").strip()))
         except Tag.DoesNotExist:
             return None
 
     def from_slugs(self, slugs, *, context: dict | None = None) -> dict[str, object]:
         from bias_ext_tags.backend.models import Tag
+        from bias_ext_tags.backend.services import TagService
 
         decoded_to_input = {
             unquote(str(slug or "").strip()): str(slug or "").strip()
             for slug in slugs or ()
             if str(slug or "").strip()
         }
-        tags = Tag.objects.filter(slug__in=decoded_to_input.keys())
+        tags = TagService.filter_tags_for_user(
+            Tag.objects.filter(slug__in=decoded_to_input.keys()),
+            (context or {}).get("user"),
+            action="view",
+        )
         return {
             decoded_to_input[tag.slug]: tag
             for tag in tags
@@ -47,17 +57,23 @@ class TagIdWithSlugDriver:
 
     def from_slug(self, slug: str, *, context: dict | None = None):
         from bias_ext_tags.backend.models import Tag
+        from bias_ext_tags.backend.services import TagService
 
         tag_id = self._id(slug)
         if tag_id is None:
             return None
         try:
-            return Tag.objects.get(id=tag_id)
+            return TagService.filter_tags_for_user(
+                Tag.objects.all(),
+                (context or {}).get("user"),
+                action="view",
+            ).get(id=tag_id)
         except Tag.DoesNotExist:
             return None
 
     def from_slugs(self, slugs, *, context: dict | None = None) -> dict[str, object]:
         from bias_ext_tags.backend.models import Tag
+        from bias_ext_tags.backend.services import TagService
 
         id_to_input = {}
         for slug in slugs or ():
@@ -67,7 +83,11 @@ class TagIdWithSlugDriver:
                 id_to_input[tag_id] = normalized
         if not id_to_input:
             return {}
-        tags = Tag.objects.filter(id__in=id_to_input.keys())
+        tags = TagService.filter_tags_for_user(
+            Tag.objects.filter(id__in=id_to_input.keys()),
+            (context or {}).get("user"),
+            action="view",
+        )
         return {
             id_to_input[tag.id]: tag
             for tag in tags

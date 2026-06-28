@@ -1642,6 +1642,110 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
             {first_discussion.id, second_discussion.id},
         )
 
+    def test_discussion_list_tag_filter_hides_invisible_tag_slug(self):
+        staff_tag = Tag.objects.create(
+            name="过滤管理标签",
+            slug="staff-filter-tag",
+            view_scope=Tag.ACCESS_STAFF,
+            start_discussion_scope=Tag.ACCESS_STAFF,
+            reply_scope=Tag.ACCESS_STAFF,
+        )
+        admin = User.objects.create_superuser(
+            username="staff-filter-admin",
+            email="staff-filter-admin@example.com",
+            password="password123",
+        )
+        create_runtime_discussion(
+            title="管理标签过滤讨论",
+            content="访客不能通过 tag filter 绕过可见性。",
+            user=admin,
+            extension_payload=discussion_tags_payload([staff_tag.id]),
+        )
+
+        guest_response = self.client.get("/api/discussions/", {"tag": staff_tag.slug})
+        self.assertEqual(guest_response.status_code, 200, guest_response.content)
+        self.assertEqual(guest_response.json()["total"], 0)
+        self.assertEqual(guest_response.json()["data"], [])
+
+        admin_response = self.client.get(
+            "/api/discussions/",
+            {"tag": staff_tag.slug},
+            **self.auth_header(admin),
+        )
+        self.assertEqual(admin_response.status_code, 200, admin_response.content)
+        self.assertEqual(admin_response.json()["total"], 1)
+
+    def test_discussion_list_tag_filter_allows_restricted_tag_with_view_permission(self):
+        restricted_tag = Tag.objects.create(
+            name="受限过滤标签",
+            slug="restricted-filter-tag",
+            is_restricted=True,
+            view_scope=Tag.ACCESS_PUBLIC,
+            start_discussion_scope=Tag.ACCESS_MEMBERS,
+            reply_scope=Tag.ACCESS_MEMBERS,
+        )
+        admin = User.objects.create_superuser(
+            username="restricted-filter-admin",
+            email="restricted-filter-admin@example.com",
+            password="password123",
+        )
+        discussion = create_runtime_discussion(
+            title="受限标签过滤讨论",
+            content="只有有 tag view 权限的用户可筛选。",
+            user=admin,
+            extension_payload=discussion_tags_payload([restricted_tag.id]),
+        )
+        member_group = Group.objects.create(name="RestrictedFilter", color="#4d698e")
+        Permission.objects.create(group=member_group, permission="viewForum")
+        self.reader.user_groups.add(member_group)
+
+        denied_response = self.client.get(
+            "/api/discussions/",
+            {"tag": restricted_tag.slug},
+            **self.auth_header(self.reader),
+        )
+        self.assertEqual(denied_response.status_code, 200, denied_response.content)
+        self.assertEqual(denied_response.json()["total"], 0)
+
+        Permission.objects.create(group=member_group, permission=f"tag{restricted_tag.id}.viewForum")
+        if hasattr(self.reader, "_forum_permission_cache"):
+            delattr(self.reader, "_forum_permission_cache")
+
+        allowed_response = self.client.get(
+            "/api/discussions/",
+            {"tag": restricted_tag.slug},
+            **self.auth_header(self.reader),
+        )
+        self.assertEqual(allowed_response.status_code, 200, allowed_response.content)
+        self.assertEqual([item["id"] for item in allowed_response.json()["data"]], [discussion.id])
+
+    def test_discussion_list_active_slug_driver_respects_tag_visibility(self):
+        set_active_slug_driver(Tag, "id_with_slug")
+        staff_tag = Tag.objects.create(
+            name="ID 管理过滤标签",
+            slug="id-staff-filter-tag",
+            view_scope=Tag.ACCESS_STAFF,
+            start_discussion_scope=Tag.ACCESS_STAFF,
+            reply_scope=Tag.ACCESS_STAFF,
+        )
+        admin = User.objects.create_superuser(
+            username="id-staff-filter-admin",
+            email="id-staff-filter-admin@example.com",
+            password="password123",
+        )
+        create_runtime_discussion(
+            title="ID 管理标签过滤讨论",
+            content="active driver 也不能绕过可见性。",
+            user=admin,
+            extension_payload=discussion_tags_payload([staff_tag.id]),
+        )
+
+        response = self.client.get("/api/discussions/", {"tag": f"{staff_tag.id}-renamed"})
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["total"], 0)
+        self.assertEqual(response.json()["data"], [])
+
     def test_discussion_list_active_slug_driver_resolves_multiple_slugs_with_one_lookup(self):
         from bias_ext_tags.backend.search import apply_discussion_tag_list_query
 
