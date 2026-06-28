@@ -8,7 +8,12 @@
   ],
   "dependencies": [
     "core",
-    "users"
+    "users",
+    "discussions"
+  ],
+  "optional_dependencies": [
+    "posts",
+    "flags"
   ],
   "django": {
     "app_config": "bias_ext_tags.backend.apps.TagsExtensionConfig",

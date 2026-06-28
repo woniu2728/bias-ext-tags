@@ -2,35 +2,48 @@ import json
 from pathlib import Path
 
 from django.core.management import call_command
+from django.db import connection
 from django.test import TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from ninja_jwt.tokens import RefreshToken
 from io import StringIO
 from unittest.mock import Mock, patch
 
-from bias_core.domain_events import get_forum_event_bus
-from bias_core.extensions.bootstrap import bootstrap_extension_application, reset_extension_application_bootstrap_state
-from bias_core.extensions.lifecycle import rebuild_runtime_urlconf, reset_extension_runtime_state
-from bias_core.extensions.registry import ExtensionRegistry
-from bias_core.forum_registry import get_forum_registry
 from bias_core.extensions.runtime import (
     approve_runtime_discussion,
     create_runtime_discussion,
     delete_runtime_discussion,
+    get_runtime_model_url_service,
+    get_runtime_tag_state_model,
     set_runtime_discussion_hidden_state,
+    to_runtime_model_slug,
     update_runtime_discussion,
 )
-from extensions.discussions.backend.events import DiscussionCreatedEvent
-from extensions.posts.backend.events import PostCreatedEvent, PostHiddenEvent
-from bias_core.models import AuditLog, ExtensionInstallation
 from bias_core.extensions import ResourceEndpointDefinition
-from bias_core.testing import ResourceRegistry, get_resource_registry
-from bias_core.settings_service import clear_runtime_setting_caches
-from bias_core.testing import ExtensionRuntimeTestMixin
+from bias_core.extensions.testing import (
+    AuditLog,
+    ExtensionInstallation,
+    ExtensionRegistry,
+    ExtensionRuntimeTestMixin,
+    ResourceRegistry,
+    bootstrap_extension_application,
+    build_runtime_event,
+    can_view_model_instance,
+    capture_realtime_discussion_events,
+    capture_runtime_events,
+    clear_runtime_setting_caches,
+    get_forum_event_bus,
+    get_forum_registry,
+    get_resource_registry,
+    rebuild_runtime_urlconf,
+    reset_extension_application_bootstrap_state,
+    reset_extension_runtime_state,
+)
 from bias_ext_tags.backend.events import DiscussionTaggedEvent, TagStatsRefreshRequestedEvent
 from bias_ext_tags.backend.models import Tag
 from bias_core.extensions.runtime import get_runtime_discussion_tag_model
 from bias_ext_tags.backend.services import TagService
-from bias_ext_tags.backend.ext import tag_resource_endpoints
+from bias_ext_tags.backend.resources import tag_resource_endpoints
 from bias_core.extensions.runtime import (
     create_runtime_post,
     get_runtime_post_model,
@@ -56,6 +69,7 @@ Group = RuntimeModelProxy(get_runtime_group_model)
 Permission = RuntimeModelProxy(get_runtime_permission_model)
 Post = RuntimeModelProxy(get_runtime_post_model)
 DiscussionTag = RuntimeModelProxy(get_runtime_discussion_tag_model)
+TagState = RuntimeModelProxy(get_runtime_tag_state_model)
 
 
 def discussion_tags_payload(tag_ids):
@@ -88,7 +102,7 @@ def discussion_resource_payload(*, title=None, content=None, tag_ids=None):
 
 class TagsExtensionRuntimeTests(ExtensionRuntimeTestMixin, TestCase):
     def test_tags_extension_registers_extension_settings_page(self):
-        registry = ExtensionRegistry(extensions_path=Path.cwd() / "extensions")
+        registry = ExtensionRegistry()
         extension = registry.get_extension("tags")
 
         self.assertEqual(extension.source, "filesystem")
@@ -102,19 +116,90 @@ class TagsExtensionRuntimeTests(ExtensionRuntimeTestMixin, TestCase):
 
         self.assertIn("tags.service", application.get_service_provider_keys(extension_id="tags"))
         self.assertEqual(service["model"].__name__, "Tag")
+        self.assertEqual(service["state_model"].__name__, "TagState")
         self.assertEqual(service["relationship_model"].__name__, "DiscussionTag")
         for key in (
             "summaries_by_slugs",
             "create_tag",
             "move_tag",
+            "order_tags",
             "delete_tag",
             "filter_tags_for_user",
             "dispatch_refresh_tag_stats",
             "refresh_discussion_tag_stats",
             "refresh_tag_stats",
             "ensure_can_start_discussion",
+            "state_for_user",
+            "prefetch_state_for_user",
+            "mark_tag_read",
         ):
             self.assertTrue(callable(service[key]), key)
+
+    def test_tags_extension_registers_bypass_tag_counts_permission(self):
+        registry = ExtensionRegistry()
+        extension = registry.get_extension("tags")
+
+        permissions = {permission.code: permission for permission in extension.permissions}
+
+        self.assertIn("bypassTagCounts", permissions)
+        self.assertEqual(permissions["bypassTagCounts"].section, "tags")
+
+    def test_tags_posts_integration_is_optional(self):
+        self.disable_extension_for_test("posts")
+        application = self.bootstrap_extensions("tags")
+        forum_registry = get_forum_registry()
+        resource_registry = get_resource_registry()
+
+        self.assertIsNone(forum_registry.get_post_type("discussionTagged"))
+        self.assertFalse(any(
+            item.resource == "post" and item.relationship == "eventPostMentionsTags"
+            for item in resource_registry.get_relationships("post")
+        ))
+        self.assertFalse(any(
+            getattr(getattr(item, "handler", None), "__name__", "") == "handle_post_created_tag_stats"
+            for item in application.events.get_listeners(extension_id="tags")
+        ))
+
+    def test_tags_registers_post_integration_when_posts_enabled(self):
+        application = self.bootstrap_extensions("posts", "tags")
+        forum_registry = get_forum_registry()
+        resource_registry = get_resource_registry()
+
+        self.assertIsNotNone(forum_registry.get_post_type("discussionTagged"))
+        self.assertTrue(any(
+            item.resource == "post" and item.relationship == "eventPostMentionsTags"
+            for item in resource_registry.get_relationships("post")
+        ))
+        self.assertTrue(any(
+            getattr(getattr(item, "handler", None), "__name__", "") == "handle_post_created_tag_stats"
+            for item in application.events.get_listeners(extension_id="tags")
+        ))
+
+    def test_tags_extension_registers_default_and_id_slug_drivers(self):
+        self.bootstrap_extensions("tags")
+        model_urls = get_runtime_model_url_service()
+
+        drivers = model_urls.get_slug_drivers(Tag)
+
+        self.assertEqual(
+            {driver.identifier for driver in drivers},
+            {"default", "id_with_slug"},
+        )
+
+    def test_id_with_slug_driver_formats_and_resolves_by_leading_id(self):
+        self.bootstrap_extensions("tags")
+        tag = Tag.objects.create(name="公告", slug="announcements")
+
+        slug = to_runtime_model_slug(Tag, tag, identifier="id_with_slug")
+
+        self.assertEqual(slug, f"{tag.id}-announcements")
+        self.assertEqual(TagService.get_tag_by_url_slug(f"{tag.id}-renamed", driver="id_with_slug"), tag)
+
+    def test_tag_slug_lookup_falls_back_to_id_with_slug_when_default_slug_missing(self):
+        self.bootstrap_extensions("tags")
+        tag = Tag.objects.create(name="公告", slug="announcements")
+
+        self.assertEqual(TagService.get_tag_by_url_slug(f"{tag.id}-renamed", driver="id_with_slug"), tag)
 
     def test_tags_capabilities_are_filtered_when_extension_disabled(self):
         self.disable_extension_for_test("tags")
@@ -269,7 +354,11 @@ class TagStatsTests(TestCase):
         self.assertEqual(self.tag.last_posted_discussion_id, discussion.id)
 
 
-class TagAccessApiTests(TestCase):
+class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
+    def _pre_setup(self):
+        super()._pre_setup()
+        self.bootstrap_extensions("tags")
+
     def setUp(self):
         self.member = User.objects.create_user(
             username="member",
@@ -337,8 +426,111 @@ class TagAccessApiTests(TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         payload = response.json()
         self.assertTrue(payload["can_start_discussion"])
+        self.assertTrue(payload["can_add_to_discussion"])
         self.assertTrue(payload["can_reply"])
         self.assertEqual(payload["last_posted_discussion"]["id"], discussion.id)
+
+    def test_tag_detail_exposes_actor_tag_state_for_authenticated_user(self):
+        marked_state = TagService.mark_tag_read(self.members_tag, self.member)
+
+        response = self.client.get(
+            f"/api/tags/{self.members_tag.id}",
+            **self.auth_header(self.member),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertEqual(payload["state"]["is_hidden"], False)
+        self.assertIsNotNone(payload["state"]["marked_as_read_at"])
+        self.assertEqual(TagState.objects.get(tag=self.members_tag, user=self.member).id, marked_state.id)
+
+    def test_tag_detail_omits_actor_tag_state_for_guest(self):
+        response = self.client.get(f"/api/tags/{self.public_tag.id}")
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertIsNone(response.json()["state"])
+
+    def test_tag_list_prefetches_actor_tag_state(self):
+        state = TagState.objects.create(
+            tag=self.public_tag,
+            user=self.member,
+            is_hidden=True,
+        )
+
+        response = self.client.get("/api/tags", **self.auth_header(self.member))
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload_by_slug = {tag["slug"]: tag for tag in response.json()["data"]}
+        self.assertEqual(payload_by_slug[self.public_tag.slug]["state"]["is_hidden"], True)
+        self.assertIsNone(payload_by_slug[self.public_tag.slug]["state"]["marked_as_read_at"])
+        self.assertEqual(state.tag_id, self.public_tag.id)
+
+    def test_restricted_tag_add_to_discussion_uses_tag_specific_permission(self):
+        tag = Tag.objects.create(
+            name="受限发帖标签",
+            slug="restricted-add-to-discussion",
+            is_restricted=True,
+            view_scope=Tag.ACCESS_PUBLIC,
+            start_discussion_scope=Tag.ACCESS_MEMBERS,
+            reply_scope=Tag.ACCESS_MEMBERS,
+        )
+        limited_group = Group.objects.create(name="TagLimited", color="#4d698e")
+        Permission.objects.create(group=limited_group, permission="startDiscussion")
+        Permission.objects.create(group=limited_group, permission="discussion.reply")
+        self.member.user_groups.add(limited_group)
+
+        denied_response = self.client.get(
+            f"/api/tags/{tag.id}",
+            **self.auth_header(self.member),
+        )
+        self.assertEqual(denied_response.status_code, 200, denied_response.content)
+        self.assertFalse(denied_response.json()["can_start_discussion"])
+        self.assertFalse(denied_response.json()["can_add_to_discussion"])
+
+        Permission.objects.create(group=limited_group, permission=f"tag{tag.id}.startDiscussion")
+        if hasattr(self.member, "_forum_permission_cache"):
+            delattr(self.member, "_forum_permission_cache")
+
+        allowed_response = self.client.get(
+            f"/api/tags/{tag.id}",
+            **self.auth_header(self.member),
+        )
+        self.assertEqual(allowed_response.status_code, 200, allowed_response.content)
+        self.assertTrue(allowed_response.json()["can_start_discussion"])
+        self.assertTrue(allowed_response.json()["can_add_to_discussion"])
+
+    def test_start_discussion_tag_list_hides_restricted_tags_without_tag_permission(self):
+        restricted_tag = Tag.objects.create(
+            name="受限选择标签",
+            slug="restricted-picker-tag",
+            is_restricted=True,
+            view_scope=Tag.ACCESS_PUBLIC,
+            start_discussion_scope=Tag.ACCESS_MEMBERS,
+            reply_scope=Tag.ACCESS_MEMBERS,
+        )
+        member_group = Group.objects.create(name="RestrictedPicker", color="#4d698e")
+        Permission.objects.create(group=member_group, permission="startDiscussion")
+        self.member.user_groups.add(member_group)
+
+        denied_response = self.client.get(
+            "/api/tags",
+            {"purpose": "start_discussion"},
+            **self.auth_header(self.member),
+        )
+        self.assertEqual(denied_response.status_code, 200, denied_response.content)
+        self.assertNotIn(restricted_tag.slug, {tag["slug"] for tag in denied_response.json()["data"]})
+
+        Permission.objects.create(group=member_group, permission=f"tag{restricted_tag.id}.startDiscussion")
+        if hasattr(self.member, "_forum_permission_cache"):
+            delattr(self.member, "_forum_permission_cache")
+
+        allowed_response = self.client.get(
+            "/api/tags",
+            {"purpose": "start_discussion"},
+            **self.auth_header(self.member),
+        )
+        self.assertEqual(allowed_response.status_code, 200, allowed_response.content)
+        self.assertIn(restricted_tag.slug, {tag["slug"] for tag in allowed_response.json()["data"]})
 
     def test_tag_detail_supports_resource_field_selection(self):
         create_runtime_discussion(
@@ -380,6 +572,12 @@ class TagAccessApiTests(TestCase):
         self.assertIn("can_reply", payload)
         self.assertIn("last_posted_discussion", payload)
         self.assertEqual(payload["last_posted_discussion"]["id"], discussion.id)
+
+    def test_tag_slug_detail_accepts_id_with_slug_url(self):
+        response = self.client.get(f"/api/tags/slug/{self.public_tag.id}-renamed")
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["slug"], "public-tag")
 
     def test_tag_detail_static_route_uses_resource_endpoint_mutator(self):
         def mutate_endpoint(endpoint):
@@ -469,13 +667,19 @@ class TagForumSettingsTests(TestCase):
             email="tag-forum-admin@example.com",
             password="password123",
         )
+        self.member = User.objects.create_user(
+            username="tag-forum-member",
+            email="tag-forum-member@example.com",
+            password="password123",
+            is_email_confirmed=True,
+        )
 
     def tearDown(self):
         clear_runtime_setting_caches()
         super().tearDown()
 
-    def auth_header(self):
-        token = RefreshToken.for_user(self.admin).access_token
+    def auth_header(self, user=None):
+        token = RefreshToken.for_user(user or self.admin).access_token
         return {"HTTP_AUTHORIZATION": f"Bearer {token}"}
 
     def test_extension_detail_api_surfaces_registered_resources_for_tags_extension(self):
@@ -583,8 +787,18 @@ class TagForumSettingsTests(TestCase):
             ["announcements", "staff"],
         )
 
+    def test_public_forum_settings_use_bypass_tag_counts_permission(self):
+        bypass_group = Group.objects.create(name="BypassTagCounts", color="#4d698e")
+        Permission.objects.create(group=bypass_group, permission="bypassTagCounts")
+        self.member.user_groups.add(bypass_group)
 
-class TagSearchApiTests(TestCase):
+        response = self.client.get("/api/forum", **self.auth_header(self.member))
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(response.json()["can_bypass_tag_counts"])
+
+
+class TagSearchApiTests(ExtensionRuntimeTestMixin, TestCase):
     def setUp(self):
         self.user = User.objects.create_user(
             username="tag-search-user",
@@ -663,8 +877,78 @@ class TagSearchApiTests(TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         self.assertIn("tag:<slug>", {item["syntax"] for item in response.json()["filters"]})
 
+    def test_search_filters_api_accepts_registered_tag_target(self):
+        response = self.client.get("/api/search/filters", {"target": "tag"})
 
-class TagDiscussionForumApiTests(TestCase):
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertEqual(payload["target"], "tag")
+        self.assertEqual(payload["filters"], [])
+
+    def test_tags_extension_registers_tag_search_target(self):
+        application = self.bootstrap_extensions("tags")
+
+        self.assertIn("search.target.tag", application.get_service_provider_keys(extension_id="tags"))
+        provider = application.get_service("search.target.tag")
+        self.assertEqual(provider["model"].__name__, "Tag")
+        self.assertEqual(provider["resource"], "tag")
+        self.assertEqual(provider["results_key"], "tags")
+
+    def test_search_api_tags_type_matches_name_or_slug_prefix(self):
+        matched_by_name = Tag.objects.create(name="Support", slug="help")
+        matched_by_slug = Tag.objects.create(name="Docs", slug="support-docs")
+        Tag.objects.create(name="Community Support", slug="community-support")
+
+        response = self.client.get(
+            "/api/search",
+            {"q": "sup", "type": "tag"},
+            **self.auth_header(),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertEqual(payload["type"], "tag")
+        self.assertEqual(payload["tag_total"], 2)
+        self.assertEqual({item["id"] for item in payload["tags"]}, {matched_by_name.id, matched_by_slug.id})
+
+    def test_search_api_all_includes_tag_section(self):
+        Tag.objects.create(name="Support", slug="support")
+
+        response = self.client.get(
+            "/api/search",
+            {"q": "sup", "type": "all"},
+            **self.auth_header(),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertEqual(payload["tag_total"], 1)
+        self.assertEqual(len(payload["tags"]), 1)
+        self.assertEqual(payload["tags"][0]["slug"], "support")
+
+    def test_search_api_tags_type_respects_tag_visibility(self):
+        Tag.objects.create(name="Support", slug="support")
+        Tag.objects.create(
+            name="Support Staff",
+            slug="support-staff",
+            view_scope=Tag.ACCESS_STAFF,
+            start_discussion_scope=Tag.ACCESS_STAFF,
+            reply_scope=Tag.ACCESS_STAFF,
+        )
+
+        response = self.client.get("/api/search", {"q": "sup", "type": "tag"})
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertEqual(payload["tag_total"], 1)
+        self.assertEqual([item["slug"] for item in payload["tags"]], ["support"])
+
+
+class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
+    def _pre_setup(self):
+        super()._pre_setup()
+        self.bootstrap_extensions("tags")
+
     def setUp(self):
         self.author = User.objects.create_user(
             username="tag-discussion-author",
@@ -708,6 +992,57 @@ class TagDiscussionForumApiTests(TestCase):
         self.assertEqual(len(payload["data"]), 1)
         self.assertEqual(payload["data"][0]["id"], life_discussion.id)
         self.assertEqual(payload["data"][0]["tags"][0]["slug"], life_tag.slug)
+
+    def test_all_discussions_list_hides_discussions_in_hidden_tags_by_default(self):
+        public_tag = Tag.objects.create(name="公开", slug="public-list")
+        hidden_tag = Tag.objects.create(name="隐藏", slug="hidden-list", is_hidden=True)
+        visible_discussion = create_runtime_discussion(
+            title="公开标签讨论",
+            content="普通列表可见",
+            user=self.author,
+            extension_payload=discussion_tags_payload([public_tag.id]),
+        )
+        hidden_discussion = create_runtime_discussion(
+            title="隐藏标签讨论",
+            content="默认全部列表隐藏",
+            user=self.author,
+            extension_payload=discussion_tags_payload([hidden_tag.id]),
+        )
+
+        response = self.client.get("/api/discussions/")
+
+        self.assertEqual(response.status_code, 200, response.content)
+        ids = [item["id"] for item in response.json()["data"]]
+        self.assertIn(visible_discussion.id, ids)
+        self.assertNotIn(hidden_discussion.id, ids)
+
+    def test_hidden_tag_discussions_are_visible_when_explicitly_filtering_that_tag(self):
+        hidden_tag = Tag.objects.create(name="隐藏", slug="hidden-filter", is_hidden=True)
+        discussion = create_runtime_discussion(
+            title="隐藏标签过滤讨论",
+            content="显式标签筛选可见",
+            user=self.author,
+            extension_payload=discussion_tags_payload([hidden_tag.id]),
+        )
+
+        response = self.client.get("/api/discussions/", {"tag": hidden_tag.slug})
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual([item["id"] for item in response.json()["data"]], [discussion.id])
+
+    def test_hidden_tag_discussions_are_not_hidden_from_fulltext_discussion_list_search(self):
+        hidden_tag = Tag.objects.create(name="隐藏", slug="hidden-search-list", is_hidden=True)
+        discussion = create_runtime_discussion(
+            title="隐藏标签全文检索讨论",
+            content="unique-hidden-tag-search-keyword",
+            user=self.author,
+            extension_payload=discussion_tags_payload([hidden_tag.id]),
+        )
+
+        response = self.client.get("/api/discussions/", {"q": "unique-hidden-tag-search-keyword"})
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual([item["id"] for item in response.json()["data"]], [discussion.id])
 
     def test_discussion_detail_field_selection_keeps_tags_relationship(self):
         tag = Tag.objects.create(name="字段裁剪标签", slug="field-selection-tag", color="#4d698e")
@@ -761,6 +1096,103 @@ class TagDiscussionForumApiTests(TestCase):
         self.assertEqual(admin_response.status_code, 200, admin_response.content)
         self.assertEqual(admin_response.json()["total"], 1)
         self.assertEqual(admin_response.json()["data"][0]["id"], discussion.id)
+
+    def test_discussion_list_hides_untagged_discussions_without_global_view_permission(self):
+        public_tag = Tag.objects.create(
+            name="Public Permission Scope",
+            slug="public-permission-scope",
+        )
+        untagged_discussion = create_runtime_discussion(
+            title="Untagged without global view",
+            content="Should be hidden without viewForum",
+            user=self.author,
+        )
+        tagged_discussion = create_runtime_discussion(
+            title="Tagged without global view",
+            content="Can be visible through allowed tag",
+            user=self.author,
+            extension_payload=discussion_tags_payload([public_tag.id]),
+        )
+        untagged_post = create_runtime_post(
+            discussion_id=untagged_discussion.id,
+            content="Untagged reply",
+            user=self.author,
+        )
+        tagged_post = create_runtime_post(
+            discussion_id=tagged_discussion.id,
+            content="Tagged reply",
+            user=self.author,
+        )
+
+        limited_reader = User.objects.create_user(
+            username="tag-scope-limited-reader",
+            email="tag-scope-limited-reader@example.com",
+            password="password123",
+            is_email_confirmed=True,
+        )
+        empty_group = Group.objects.create(name="TagScopeNoForumView", color="#4d698e")
+        limited_reader.user_groups.add(empty_group)
+        Discussion = type(untagged_discussion)
+
+        visible_discussion_ids = set(
+            TagService.filter_discussions_for_user(
+                Discussion.objects.filter(id__in=[untagged_discussion.id, tagged_discussion.id]),
+                limited_reader,
+            ).values_list("id", flat=True)
+        )
+        visible_post_ids = set(
+            TagService.filter_posts_for_user(
+                Post.objects.filter(id__in=[untagged_post.id, tagged_post.id]),
+                limited_reader,
+            ).values_list("id", flat=True)
+        )
+
+        self.assertNotIn(untagged_discussion.id, visible_discussion_ids)
+        self.assertIn(tagged_discussion.id, visible_discussion_ids)
+        self.assertNotIn(untagged_post.id, visible_post_ids)
+        self.assertIn(tagged_post.id, visible_post_ids)
+
+    def test_tag_visibility_scopes_use_database_subqueries_for_forbidden_tags(self):
+        staff_tag = Tag.objects.create(
+            name="Subquery Staff",
+            slug="subquery-staff-zone",
+            view_scope=Tag.ACCESS_STAFF,
+            start_discussion_scope=Tag.ACCESS_STAFF,
+            reply_scope=Tag.ACCESS_STAFF,
+        )
+        admin = User.objects.create_superuser(
+            username="subquery-tag-admin",
+            email="subquery-tag-admin@example.com",
+            password="password123",
+        )
+        discussion = create_runtime_discussion(
+            title="Subquery visibility discussion",
+            content="Hidden behind staff tag",
+            user=admin,
+            extension_payload=discussion_tags_payload([staff_tag.id]),
+        )
+        post = create_runtime_post(
+            discussion_id=discussion.id,
+            content="Hidden post behind staff tag",
+            user=admin,
+        )
+        Discussion = type(discussion)
+
+        with CaptureQueriesContext(connection) as queries:
+            visible_discussions = TagService.filter_discussions_for_user(
+                Discussion.objects.all(),
+                self.reader,
+            )
+            self.assertNotIn(discussion.id, set(visible_discussions.values_list("id", flat=True)))
+            visible_posts = TagService.filter_posts_for_user(
+                Post.objects.all(),
+                self.reader,
+            )
+            self.assertNotIn(post.id, set(visible_posts.values_list("id", flat=True)))
+
+        sql = " ".join(query["sql"].lower() for query in queries)
+        self.assertIn(" in (select", sql)
+        self.assertNotIn('from "tags" where "tags"."is_restricted"', sql)
 
     def test_cannot_create_discussion_in_staff_only_tag(self):
         restricted_tag = Tag.objects.create(
@@ -828,8 +1260,8 @@ class TagDiscussionForumApiTests(TestCase):
             extension_payload=discussion_tags_payload([tag_a.id]),
         )
 
-        mocked_bus = Mock()
-        with patch("bias_core.domain_events.get_forum_event_bus", return_value=mocked_bus):
+        events, dispatch_patch = capture_runtime_events()
+        with dispatch_patch:
             with self.captureOnCommitCallbacks(execute=True):
                 update_runtime_discussion(
                     discussion_id=discussion.id,
@@ -837,7 +1269,6 @@ class TagDiscussionForumApiTests(TestCase):
                     extension_payload=discussion_tags_payload([tag_b.id]),
                 )
 
-        events = [call.args[0] for call in mocked_bus.dispatch.call_args_list]
         tag_refresh_event = next(
             event for event in events if isinstance(event, TagStatsRefreshRequestedEvent)
         )
@@ -864,8 +1295,8 @@ class TagDiscussionForumApiTests(TestCase):
             extension_payload=discussion_tags_payload([parent_tag.id, old_child_tag.id]),
         )
 
-        mocked_bus = Mock()
-        with patch("bias_core.domain_events.get_forum_event_bus", return_value=mocked_bus):
+        events, dispatch_patch = capture_runtime_events()
+        with dispatch_patch:
             with self.captureOnCommitCallbacks(execute=True):
                 update_runtime_discussion(
                     discussion_id=discussion.id,
@@ -873,7 +1304,6 @@ class TagDiscussionForumApiTests(TestCase):
                     extension_payload=discussion_tags_payload([parent_tag.id, new_child_tag.id]),
                 )
 
-        events = [call.args[0] for call in mocked_bus.dispatch.call_args_list]
         tagged_event = next(
             event for event in events if isinstance(event, DiscussionTaggedEvent)
         )
@@ -885,7 +1315,7 @@ class TagDiscussionForumApiTests(TestCase):
     def test_updating_discussion_tags_creates_discussion_tagged_event_post(self):
         member_group = Group.objects.create(name="DiscussionTagEditor", color="#4d698e")
         Permission.objects.create(group=member_group, permission="startDiscussion")
-        Permission.objects.create(group=member_group, permission="discussion.editOwn")
+        Permission.objects.create(group=member_group, permission="discussion.reply")
         self.author.user_groups.add(member_group)
 
         original_tag = Tag.objects.create(name="后端", slug="backend", color="#2980b9")
@@ -921,6 +1351,113 @@ class TagDiscussionForumApiTests(TestCase):
             },
         )
 
+    def test_author_can_retag_own_discussion_before_replies_by_default(self):
+        member_group = Group.objects.create(name="DiscussionTagReplyWindow", color="#4d698e")
+        Permission.objects.create(group=member_group, permission="startDiscussion")
+        Permission.objects.create(group=member_group, permission="discussion.reply")
+        self.author.user_groups.add(member_group)
+
+        original_tag = Tag.objects.create(name="旧标签", slug="old-window-tag", color="#2980b9")
+        new_tag = Tag.objects.create(name="新标签", slug="new-window-tag", color="#e67e22")
+        discussion = create_runtime_discussion(
+            title="Retag before reply",
+            content="Original content",
+            user=self.author,
+            extension_payload=discussion_tags_payload([original_tag.id]),
+        )
+
+        response = self.client.patch(
+            f"/api/discussions/{discussion.id}",
+            data=json.dumps(discussion_tags_payload([new_tag.id])),
+            content_type="application/json",
+            **self.auth_header(self.author),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(
+            list(DiscussionTag.objects.filter(discussion=discussion).values_list("tag_id", flat=True)),
+            [new_tag.id],
+        )
+
+    def test_author_cannot_retag_own_discussion_after_replies_by_default(self):
+        member_group = Group.objects.create(name="DiscussionTagReplyLocked", color="#4d698e")
+        Permission.objects.create(group=member_group, permission="startDiscussion")
+        Permission.objects.create(group=member_group, permission="discussion.reply")
+        self.author.user_groups.add(member_group)
+        self.reader.user_groups.add(member_group)
+
+        original_tag = Tag.objects.create(name="锁定旧标签", slug="locked-old-tag", color="#2980b9")
+        new_tag = Tag.objects.create(name="锁定新标签", slug="locked-new-tag", color="#e67e22")
+        discussion = create_runtime_discussion(
+            title="Retag after reply",
+            content="Original content",
+            user=self.author,
+            extension_payload=discussion_tags_payload([original_tag.id]),
+        )
+        create_runtime_post(
+            discussion_id=discussion.id,
+            content="Reply locks retagging",
+            user=self.reader,
+        )
+        discussion.refresh_from_db()
+        self.assertGreater(discussion.participant_count, 1)
+
+        response = self.client.patch(
+            f"/api/discussions/{discussion.id}",
+            data=json.dumps(discussion_tags_payload([new_tag.id])),
+            content_type="application/json",
+            **self.auth_header(self.author),
+        )
+
+        self.assertEqual(response.status_code, 403, response.content)
+        self.assertIn("没有权限修改", response.json()["error"])
+
+    def test_author_can_retag_restricted_tag_only_with_tag_permission(self):
+        member_group = Group.objects.create(name="DiscussionRestrictedTagEditor", color="#4d698e")
+        Permission.objects.create(group=member_group, permission="startDiscussion")
+        Permission.objects.create(group=member_group, permission="discussion.reply")
+        self.author.user_groups.add(member_group)
+
+        original_tag = Tag.objects.create(name="开放标签", slug="open-retag-tag", color="#2980b9")
+        restricted_tag = Tag.objects.create(
+            name="受限新标签",
+            slug="restricted-retag-tag",
+            color="#e67e22",
+            is_restricted=True,
+            view_scope=Tag.ACCESS_PUBLIC,
+            start_discussion_scope=Tag.ACCESS_MEMBERS,
+            reply_scope=Tag.ACCESS_MEMBERS,
+        )
+        discussion = create_runtime_discussion(
+            title="Retag restricted",
+            content="Original content",
+            user=self.author,
+            extension_payload=discussion_tags_payload([original_tag.id]),
+        )
+
+        denied_response = self.client.patch(
+            f"/api/discussions/{discussion.id}",
+            data=json.dumps(discussion_tags_payload([restricted_tag.id])),
+            content_type="application/json",
+            **self.auth_header(self.author),
+        )
+
+        self.assertEqual(denied_response.status_code, 403, denied_response.content)
+        self.assertIn("没有权限将标签", denied_response.json()["error"])
+
+        Permission.objects.create(group=member_group, permission=f"tag{restricted_tag.id}.startDiscussion")
+        if hasattr(self.author, "_forum_permission_cache"):
+            delattr(self.author, "_forum_permission_cache")
+
+        allowed_response = self.client.patch(
+            f"/api/discussions/{discussion.id}",
+            data=json.dumps(discussion_tags_payload([restricted_tag.id])),
+            content_type="application/json",
+            **self.auth_header(self.author),
+        )
+
+        self.assertEqual(allowed_response.status_code, 200, allowed_response.content)
+
     def test_delete_discussion_dispatches_tag_refresh_through_extension_lifecycle(self):
         admin = User.objects.create_superuser(
             username="discussion-delete-tag-admin",
@@ -935,12 +1472,11 @@ class TagDiscussionForumApiTests(TestCase):
             extension_payload=discussion_tags_payload([tag.id]),
         )
 
-        mocked_bus = Mock()
-        with patch("bias_core.domain_events.get_forum_event_bus", return_value=mocked_bus):
+        events, dispatch_patch = capture_runtime_events()
+        with dispatch_patch:
             with self.captureOnCommitCallbacks(execute=True):
                 delete_runtime_discussion(discussion.id, admin)
 
-        events = [call.args[0] for call in mocked_bus.dispatch.call_args_list]
         refresh_event = next(
             event for event in events if isinstance(event, TagStatsRefreshRequestedEvent)
         )
@@ -1021,6 +1557,12 @@ class AdminTagManagementApiTests(TestCase):
             email="admin-tag@example.com",
             password="password123",
         )
+        self.member = User.objects.create_user(
+            username="member-tag-mgr",
+            email="member-tag@example.com",
+            password="password123",
+            is_email_confirmed=True,
+        )
         self.other_root_tag = Tag.objects.create(
             name="产品",
             slug="product",
@@ -1043,6 +1585,10 @@ class AdminTagManagementApiTests(TestCase):
 
     def auth_header(self):
         token = RefreshToken.for_user(self.admin).access_token
+        return {"HTTP_AUTHORIZATION": f"Bearer {token}"}
+
+    def auth_header_for(self, user):
+        token = RefreshToken.for_user(user).access_token
         return {"HTTP_AUTHORIZATION": f"Bearer {token}"}
 
     def test_admin_can_create_update_and_clear_tag_parent(self):
@@ -1114,6 +1660,46 @@ class AdminTagManagementApiTests(TestCase):
         self.assertIsNone(created_tag.parent_id)
         self.assertEqual(created_tag.position, 6)
         self.assertEqual(created_tag.reply_scope, "staff")
+
+    def test_admin_unrestricting_tag_deletes_tag_specific_permissions(self):
+        restricted_tag = Tag.objects.create(
+            name="权限清理",
+            slug="permission-cleanup",
+            is_restricted=True,
+        )
+        group = Group.objects.create(name="TagPermissionCleanup", color="#4d698e")
+        Permission.objects.create(group=group, permission=f"tag{restricted_tag.id}.startDiscussion")
+        Permission.objects.create(group=group, permission=f"tag{restricted_tag.id}.discussion.reply")
+        Permission.objects.create(group=group, permission="startDiscussion")
+
+        response = self.client.put(
+            f"/api/admin/tags/{restricted_tag.id}",
+            data=json.dumps({"is_restricted": False}),
+            content_type="application/json",
+            **self.auth_header(),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertFalse(Permission.objects.filter(permission__startswith=f"tag{restricted_tag.id}.").exists())
+        self.assertTrue(Permission.objects.filter(permission="startDiscussion").exists())
+
+    def test_admin_deleting_tag_deletes_tag_specific_permissions(self):
+        restricted_tag = Tag.objects.create(
+            name="删除权限清理",
+            slug="delete-permission-cleanup",
+            is_restricted=True,
+        )
+        group = Group.objects.create(name="TagDeletePermissionCleanup", color="#4d698e")
+        Permission.objects.create(group=group, permission=f"tag{restricted_tag.id}.viewForum")
+        Permission.objects.create(group=group, permission=f"tag{restricted_tag.id}.startDiscussion")
+
+        response = self.client.delete(
+            f"/api/admin/tags/{restricted_tag.id}",
+            **self.auth_header(),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertFalse(Permission.objects.filter(permission__startswith=f"tag{restricted_tag.id}.").exists())
 
     def test_admin_cannot_delete_tag_with_children(self):
         response = self.client.delete(
@@ -1227,6 +1813,74 @@ class AdminTagManagementApiTests(TestCase):
         self.assertEqual(self.child_tag.position, 1)
         self.assertEqual(self.parent_tag.position, 0)
 
+    def test_admin_can_order_tags_with_nested_tree_payload(self):
+        sibling_child = Tag.objects.create(
+            name="前端",
+            slug="frontend-order",
+            color="#3c78d8",
+            position=2,
+            parent=self.parent_tag,
+        )
+
+        response = self.client.post(
+            "/api/admin/tags/order",
+            data=json.dumps({
+                "order": [
+                    {"id": self.other_root_tag.id, "children": []},
+                    {"id": self.parent_tag.id, "children": [sibling_child.id, self.child_tag.id]},
+                ],
+            }),
+            content_type="application/json",
+            **self.auth_header(),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertEqual([item["id"] for item in payload["data"] if item["parent_id"] is None], [
+            self.other_root_tag.id,
+            self.parent_tag.id,
+        ])
+
+        self.other_root_tag.refresh_from_db()
+        self.parent_tag.refresh_from_db()
+        self.child_tag.refresh_from_db()
+        sibling_child.refresh_from_db()
+
+        self.assertEqual(self.other_root_tag.position, 0)
+        self.assertIsNone(self.other_root_tag.parent_id)
+        self.assertEqual(self.parent_tag.position, 1)
+        self.assertIsNone(self.parent_tag.parent_id)
+        self.assertEqual(sibling_child.parent_id, self.parent_tag.id)
+        self.assertEqual(sibling_child.position, 0)
+        self.assertEqual(self.child_tag.parent_id, self.parent_tag.id)
+        self.assertEqual(self.child_tag.position, 1)
+
+    def test_admin_order_tags_rejects_duplicate_ids(self):
+        response = self.client.post(
+            "/api/admin/tags/order",
+            data=json.dumps({
+                "order": [
+                    {"id": self.parent_tag.id, "children": [self.child_tag.id]},
+                    {"id": self.child_tag.id, "children": []},
+                ],
+            }),
+            content_type="application/json",
+            **self.auth_header(),
+        )
+
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn("重复标签", response.json()["error"])
+
+    def test_member_cannot_order_tags(self):
+        response = self.client.post(
+            "/api/admin/tags/order",
+            data=json.dumps({"order": [{"id": self.parent_tag.id, "children": []}]}),
+            content_type="application/json",
+            **self.auth_header_for(self.member),
+        )
+
+        self.assertEqual(response.status_code, 403, response.content)
+
     @patch("bias_ext_tags.backend.admin_api.dispatch_runtime_tag_stats_refresh")
     def test_admin_can_refresh_tag_stats(self, dispatch_runtime_tag_stats_refresh):
         dispatch_runtime_tag_stats_refresh.return_value = {
@@ -1308,35 +1962,35 @@ class TagRealtimeIntegrationTests(TestCase):
         super().tearDown()
 
     def test_hidden_discussion_is_not_visible_to_anonymous_realtime_viewer(self):
-        from bias_core.visibility import can_view_model_instance
-
         set_runtime_discussion_hidden_state(self.discussion, self.admin, True)
 
         self.discussion.refresh_from_db()
         self.assertFalse(can_view_model_instance(self.discussion.__class__, self.discussion, user=None, ability="view"))
 
     def test_visible_discussion_is_accessible_to_authenticated_realtime_viewer(self):
-        from bias_core.visibility import can_view_model_instance
-
         self.discussion.refresh_from_db()
         self.assertTrue(can_view_model_instance(self.discussion.__class__, self.discussion, user=self.author, ability="view"))
 
-    @patch("extensions.discussions.backend.realtime.broadcast_realtime_discussion_event")
-    def test_visible_post_event_broadcasts_discussion_post_and_tag_payload(self, broadcast_discussion_event):
+    def test_visible_post_event_broadcasts_discussion_post_and_tag_payload(self):
         post = create_runtime_post(
             discussion_id=self.discussion.id,
             content="新增回复",
             user=self.author,
         )
-        self.extension_app.event_bus.dispatch(PostCreatedEvent(
-            post_id=post.id,
-            discussion_id=self.discussion.id,
-            actor_user_id=self.author.id,
-            is_approved=True,
-        ))
+        broadcasts, broadcast_patch = capture_realtime_discussion_events()
+        with broadcast_patch:
+            self.extension_app.event_bus.dispatch(
+                build_runtime_event(
+                    "posts.post.created",
+                    post_id=post.id,
+                    discussion_id=self.discussion.id,
+                    actor_user_id=self.author.id,
+                    is_approved=True,
+                )
+            )
 
-        self.assertTrue(broadcast_discussion_event.called)
-        discussion_id, event_type, payload = broadcast_discussion_event.call_args.args
+        self.assertTrue(broadcasts)
+        discussion_id, event_type, payload = broadcasts[-1]
         self.assertEqual(discussion_id, self.discussion.id)
         self.assertEqual(event_type, "post.created")
         self.assertEqual(payload["discussion"]["id"], self.discussion.id)
@@ -1348,8 +2002,7 @@ class TagRealtimeIntegrationTests(TestCase):
         self.assertEqual(payload["tags"][0]["last_posted_discussion"]["id"], self.discussion.id)
         self.assertEqual(payload["tags"][0]["last_posted_discussion"]["last_post_number"], post.number)
 
-    @patch("extensions.discussions.backend.realtime.broadcast_realtime_discussion_event")
-    def test_discussion_created_event_broadcasts_related_tag_resources(self, broadcast_discussion_event):
+    def test_discussion_created_event_broadcasts_related_tag_resources(self):
         child_tag = Tag.objects.create(
             name="实时子标签",
             slug="realtime-child-tag",
@@ -1363,13 +2016,19 @@ class TagRealtimeIntegrationTests(TestCase):
             user=self.author,
             extension_payload=discussion_tags_payload([self.tag.id, child_tag.id]),
         )
-        self.extension_app.event_bus.dispatch(DiscussionCreatedEvent(
-            discussion_id=discussion.id,
-            actor_user_id=self.author.id,
-            is_approved=True,
-        ))
+        broadcasts, broadcast_patch = capture_realtime_discussion_events()
+        with broadcast_patch:
+            self.extension_app.event_bus.dispatch(
+                build_runtime_event(
+                    "discussions.discussion.created",
+                    discussion_id=discussion.id,
+                    actor_user_id=self.author.id,
+                    is_approved=True,
+                )
+            )
 
-        discussion_id, event_type, payload = broadcast_discussion_event.call_args.args
+        self.assertTrue(broadcasts)
+        discussion_id, event_type, payload = broadcasts[-1]
         self.assertEqual(discussion_id, discussion.id)
         self.assertEqual(event_type, "discussion.created")
         self.assertEqual(payload["discussion"]["id"], discussion.id)
@@ -1383,30 +2042,29 @@ class TagRealtimeIntegrationTests(TestCase):
             all(item["last_posted_discussion"]["id"] == discussion.id for item in payload["tags"])
         )
 
-    @patch("extensions.discussions.backend.realtime.broadcast_realtime_discussion_event")
-    def test_hidden_post_event_broadcasts_minimal_signal_only(self, broadcast_discussion_event):
+    def test_hidden_post_event_broadcasts_minimal_signal_only(self):
         post = create_runtime_post(
             discussion_id=self.discussion.id,
             content="待隐藏回复",
             user=self.author,
         )
-        broadcast_discussion_event.reset_mock()
 
         set_runtime_post_hidden_state(post, self.admin, True)
-        self.extension_app.event_bus.dispatch(PostHiddenEvent(
-            post_id=post.id,
-            discussion_id=self.discussion.id,
-            actor_user_id=self.admin.id,
-            post_number=post.number,
-            is_hidden=True,
-        ))
+        broadcasts, broadcast_patch = capture_realtime_discussion_events()
+        with broadcast_patch:
+            self.extension_app.event_bus.dispatch(
+                build_runtime_event(
+                    "posts.post.hidden",
+                    post_id=post.id,
+                    discussion_id=self.discussion.id,
+                    actor_user_id=self.admin.id,
+                    post_number=post.number,
+                    is_hidden=True,
+                )
+            )
 
-        discussion_id, event_type, payload = broadcast_discussion_event.call_args.args
+        self.assertTrue(broadcasts)
+        discussion_id, event_type, payload = broadcasts[-1]
         self.assertEqual(discussion_id, self.discussion.id)
         self.assertEqual(event_type, "post.hidden")
         self.assertEqual(payload, {})
-
-
-
-
-

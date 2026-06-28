@@ -66,6 +66,7 @@ def _serialize_tag(
 
 def _apply_tag_resource_preloads(queryset, user=None, action="view", resource_options=None):
     resource_options = resource_options or ResourceQueryOptions()
+    queryset = TagService.prefetch_state_for_user(queryset, user)
     return _get_resource_registry().apply_preload_plan(
         queryset,
         "tag",
@@ -258,7 +259,10 @@ def dispatch_tag_show_by_slug(context):
     user = context.get("user")
     resource_options = parse_resource_query_options(request, "tag")
     slug = str(context.get("object_id") or "").strip()
-    tag = _load_visible_tag(TagService.get_tag_by_slug(slug), user, resource_options)
+    tag = TagService.get_tag_by_url_slug(slug)
+    if tag is None:
+        tag = TagService.get_tag_by_url_slug(slug, driver="id_with_slug")
+    tag = _load_visible_tag(tag, user, resource_options)
     if tag is None:
         return api_error("标签不存在", status=404)
     if hasattr(tag, "status_code"):

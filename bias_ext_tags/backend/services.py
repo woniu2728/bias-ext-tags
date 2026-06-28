@@ -3,15 +3,26 @@ from typing import Any, Optional, List
 from django.db import transaction
 from django.db.models import Q, QuerySet
 from django.core.exceptions import PermissionDenied
+from django.utils import timezone
 from django.utils.text import slugify
-from bias_core.extensions.runtime import generate_runtime_model_slug
+from bias_core.extensions.platform import get_extension_settings
+from bias_core.extensions.runtime import (
+    generate_runtime_model_slug,
+    get_runtime_forum_permissions,
+    get_runtime_permission_model,
+    has_runtime_forum_permission,
+    resolve_runtime_model_slug,
+    to_runtime_model_slug,
+)
 from bias_core.extensions.runtime import apply_runtime_counted_discussion_filter
-from bias_ext_tags.backend.models import DiscussionTag, Tag
+from bias_ext_tags.backend.models import DiscussionTag, Tag, TagState
 from bias_ext_tags.backend.tag_relationships import (
     get_discussion_tag_ids_for_stats,
     get_discussion_tags,
     tag_has_discussions,
 )
+
+_UNSET = object()
 
 
 class TagService:
@@ -21,6 +32,11 @@ class TagService:
         "view": "view_scope",
         "start_discussion": "start_discussion_scope",
         "reply": "reply_scope",
+    }
+    ACTION_RESTRICTED_PERMISSION = {
+        "view": "viewForum",
+        "start_discussion": "startDiscussion",
+        "reply": "discussion.reply",
     }
 
     ACCESS_SCOPE_LABELS = {
@@ -81,7 +97,10 @@ class TagService:
 
     @staticmethod
     def can_start_discussion_in_tag(tag: Tag, user: Optional[Any]) -> bool:
-        if tag.is_restricted and not (user and (user.is_staff or user.is_superuser)):
+        if tag.parent_id and tag.parent:
+            if not TagService.can_start_discussion_in_tag(tag.parent, user):
+                return False
+        if tag.is_restricted and not TagService.has_restricted_tag_permission(tag, user, "startDiscussion"):
             return False
         return (
             TagService.can_view_tag(tag, user)
@@ -90,10 +109,29 @@ class TagService:
 
     @staticmethod
     def can_reply_in_tag(tag: Tag, user: Optional[Any]) -> bool:
+        if tag.parent_id and tag.parent:
+            if not TagService.can_reply_in_tag(tag.parent, user):
+                return False
+        if tag.is_restricted and not TagService.has_restricted_tag_permission(tag, user, "discussion.reply"):
+            return False
         return (
             TagService.can_view_tag(tag, user)
             and TagService.has_scope_access(user, tag.reply_scope)
         )
+
+    @staticmethod
+    def can_add_to_discussion(tag: Tag, user: Optional[Any]) -> bool:
+        return TagService.can_start_discussion_in_tag(tag, user)
+
+    @staticmethod
+    def has_restricted_tag_permission(tag: Tag, user: Optional[Any], ability: str) -> bool:
+        if not tag.is_restricted:
+            return True
+        if user and getattr(user, "is_superuser", False):
+            return True
+        if not user or not getattr(user, "is_authenticated", False):
+            return False
+        return has_runtime_forum_permission(user, f"tag{tag.id}.{ability}")
 
     @staticmethod
     def can_view_discussion_tags(discussion, user: Optional[Any]) -> bool:
@@ -102,6 +140,86 @@ class TagService:
     @staticmethod
     def can_reply_in_discussion(discussion, user: Optional[Any]) -> bool:
         return all(TagService.can_reply_in_tag(tag, user) for tag in get_discussion_tags(discussion))
+
+    @staticmethod
+    def can_tag_discussion(discussion, user: Optional[Any]) -> bool:
+        if not user or not getattr(user, "is_authenticated", False):
+            return False
+        if getattr(user, "is_suspended", False):
+            return False
+        if user.is_staff or has_runtime_forum_permission(user, "discussion.edit"):
+            return True
+        if getattr(discussion, "user_id", None) != getattr(user, "id", None):
+            return False
+        if not has_runtime_forum_permission(user, "discussion.reply"):
+            return False
+
+        allow_tag_change = TagService.get_allow_tag_change_setting()
+        if allow_tag_change == "-1":
+            return True
+        if allow_tag_change == "reply":
+            return getattr(discussion, "participant_count", 0) <= 1
+        try:
+            allowed_minutes = int(allow_tag_change)
+        except (TypeError, ValueError):
+            return False
+        created_at = getattr(discussion, "created_at", None)
+        if created_at is None:
+            return False
+        return timezone.now() - created_at < timezone.timedelta(minutes=allowed_minutes)
+
+    @staticmethod
+    def get_allow_tag_change_setting() -> str:
+        value = get_extension_settings("tags").get("allow_tag_change", "reply")
+        return str(value if value is not None else "reply").strip()
+
+    @staticmethod
+    def delete_tag_permissions(tag: Tag | int) -> int:
+        tag_id = int(getattr(tag, "id", tag) or 0)
+        if not tag_id:
+            return 0
+        Permission = get_runtime_permission_model()
+        deleted, _ = Permission.objects.filter(permission__startswith=f"tag{tag_id}.").delete()
+        return int(deleted or 0)
+
+    @staticmethod
+    def state_for_user(tag: Tag, user: Optional[Any]) -> Optional[TagState]:
+        if not user or not getattr(user, "is_authenticated", False):
+            return None
+        prefetched_states = getattr(tag, "actor_states", None)
+        if prefetched_states is not None:
+            for state in prefetched_states:
+                if state.user_id == user.id:
+                    return state
+            return TagState(tag=tag, user=user)
+
+        state = TagState.objects.filter(tag=tag, user=user).first()
+        if state is not None:
+            return state
+        return TagState(tag=tag, user=user)
+
+    @staticmethod
+    def prefetch_state_for_user(queryset: QuerySet, user: Optional[Any]) -> QuerySet:
+        if not user or not getattr(user, "is_authenticated", False):
+            return queryset
+        from django.db.models import Prefetch
+
+        return queryset.prefetch_related(
+            Prefetch(
+                "user_states",
+                queryset=TagState.objects.filter(user=user),
+                to_attr="actor_states",
+            )
+        )
+
+    @staticmethod
+    def mark_tag_read(tag: Tag, user: Any, marked_as_read_at=None) -> TagState:
+        if not user or not getattr(user, "is_authenticated", False):
+            raise PermissionDenied("请先登录")
+        state, _ = TagState.objects.get_or_create(tag=tag, user=user)
+        state.marked_as_read_at = marked_as_read_at or timezone.now()
+        state.save(update_fields=["marked_as_read_at"])
+        return state
 
     @staticmethod
     def filter_tags_for_user(queryset: QuerySet, user: Optional[Any], action: str = "view") -> QuerySet:
@@ -113,9 +231,19 @@ class TagService:
             return queryset
 
         if user and user.is_authenticated:
-            return queryset.exclude(**{scope_field: Tag.ACCESS_STAFF})
+            queryset = queryset.exclude(**{scope_field: Tag.ACCESS_STAFF})
+        else:
+            queryset = queryset.exclude(**{f"{scope_field}__in": [Tag.ACCESS_MEMBERS, Tag.ACCESS_STAFF]})
 
-        return queryset.exclude(**{f"{scope_field}__in": [Tag.ACCESS_MEMBERS, Tag.ACCESS_STAFF]})
+        restricted_permission = TagService.ACTION_RESTRICTED_PERMISSION.get(action)
+        if not restricted_permission:
+            return queryset
+
+        allowed_restricted_tag_ids = TagService._restricted_tag_ids_with_permission(
+            user,
+            restricted_permission,
+        )
+        return queryset.filter(Q(is_restricted=False) | Q(id__in=allowed_restricted_tag_ids))
 
     @staticmethod
     def get_forbidden_tag_ids(user: Optional[Any], action: str = "view") -> List[int]:
@@ -128,19 +256,65 @@ class TagService:
 
     @staticmethod
     def filter_discussions_for_user(queryset: QuerySet, user: Optional[Any]) -> QuerySet:
-        forbidden_tag_ids = TagService.get_forbidden_tag_ids(user, action="view")
-        if not forbidden_tag_ids:
+        forbidden_tag_ids = TagService._forbidden_tag_ids_queryset(user, action="view")
+        if forbidden_tag_ids is None:
             return queryset
 
-        return queryset.exclude(discussion_tags__tag_id__in=forbidden_tag_ids)
+        queryset = queryset.exclude(discussion_tags__tag_id__in=forbidden_tag_ids)
+        if not TagService._has_global_permission(user, "viewForum"):
+            queryset = queryset.filter(discussion_tags__isnull=False)
+        return queryset
 
     @staticmethod
     def filter_posts_for_user(queryset: QuerySet, user: Optional[Any]) -> QuerySet:
-        forbidden_tag_ids = TagService.get_forbidden_tag_ids(user, action="view")
-        if not forbidden_tag_ids:
+        forbidden_tag_ids = TagService._forbidden_tag_ids_queryset(user, action="view")
+        if forbidden_tag_ids is None:
             return queryset
 
-        return queryset.exclude(discussion__discussion_tags__tag_id__in=forbidden_tag_ids)
+        queryset = queryset.exclude(discussion__discussion_tags__tag_id__in=forbidden_tag_ids)
+        if not TagService._has_global_permission(user, "viewForum"):
+            queryset = queryset.filter(discussion__discussion_tags__isnull=False)
+        return queryset
+
+    @staticmethod
+    def _has_global_permission(user: Optional[Any], ability: str) -> bool:
+        if user and (getattr(user, "is_staff", False) or getattr(user, "is_superuser", False)):
+            return True
+        if ability == "viewForum" and (not user or not getattr(user, "is_authenticated", False)):
+            return True
+        return has_runtime_forum_permission(user, ability)
+
+    @staticmethod
+    def _forbidden_tag_ids_queryset(user: Optional[Any], action: str = "view"):
+        if user and (user.is_staff or user.is_superuser):
+            return None
+        allowed_tag_ids = TagService.filter_tags_for_user(
+            Tag.objects.all(),
+            user,
+            action=action,
+        ).values("id")
+        return Tag.objects.exclude(id__in=allowed_tag_ids).values("id")
+
+    @staticmethod
+    def _restricted_tag_ids_with_permission(user: Optional[Any], ability: str) -> tuple[int, ...]:
+        if not user or not getattr(user, "is_authenticated", False):
+            return ()
+        if getattr(user, "is_superuser", False):
+            return tuple(Tag.objects.filter(is_restricted=True).values_list("id", flat=True))
+
+        suffix = f".{ability}"
+        tag_ids: list[int] = []
+        for permission in get_runtime_forum_permissions(user):
+            if not permission.startswith("tag") or not permission.endswith(suffix):
+                continue
+            raw_tag_id = permission[3:-len(suffix)]
+            try:
+                tag_id = int(raw_tag_id)
+            except (TypeError, ValueError):
+                continue
+            if tag_id > 0:
+                tag_ids.append(tag_id)
+        return tuple(sorted(set(tag_ids)))
 
     @staticmethod
     def validate_tag_selection(tag_ids: Optional[List[int]]) -> List[int]:
@@ -218,12 +392,32 @@ class TagService:
             counter += 1
 
     @staticmethod
+    def to_tag_slug(tag: Tag, *, driver: str = "default") -> str:
+        runtime_slug = to_runtime_model_slug(Tag, tag, identifier=driver)
+        if runtime_slug:
+            return runtime_slug
+        return str(getattr(tag, "slug", "") or "").strip()
+
+    @staticmethod
     def ensure_can_start_discussion(user: Any, tag_ids: Optional[List[int]]) -> List[Tag]:
         tags = TagService.get_tags_for_selection(tag_ids)
 
         for tag in tags:
             if not TagService.can_start_discussion_in_tag(tag, user):
                 raise PermissionDenied(f"没有权限在标签“{tag.name}”下发起讨论")
+
+        return tags
+
+    @staticmethod
+    def ensure_can_change_discussion_tags(user: Any, discussion, tag_ids: Optional[List[int]]) -> List[Tag]:
+        tags = TagService.get_tags_for_selection(tag_ids)
+        if not TagService.can_tag_discussion(discussion, user):
+            raise PermissionDenied("没有权限修改此讨论的标签")
+
+        old_tag_ids = set(get_discussion_tag_ids_for_stats(discussion))
+        for tag in tags:
+            if tag.id not in old_tag_ids and not TagService.can_add_to_discussion(tag, user):
+                raise PermissionDenied(f"没有权限将标签“{tag.name}”添加到讨论")
 
         return tags
 
@@ -418,10 +612,23 @@ class TagService:
         Returns:
             Optional[Tag]: 标签对象
         """
+        runtime_tag = resolve_runtime_model_slug(Tag, slug, identifier="default")
+        if runtime_tag is not None:
+            return runtime_tag
+
         try:
             return Tag.objects.get(slug=slug)
         except Tag.DoesNotExist:
             return None
+
+    @staticmethod
+    def get_tag_by_url_slug(slug: str, *, driver: str = "default") -> Optional[Tag]:
+        runtime_tag = resolve_runtime_model_slug(Tag, slug, identifier=driver)
+        if runtime_tag is not None:
+            return runtime_tag
+        if driver == "default":
+            return TagService.get_tag_by_slug(slug)
+        return None
 
     @staticmethod
     def update_tag(
@@ -434,7 +641,7 @@ class TagService:
         icon: Optional[str] = None,
         background_url: Optional[str] = None,
         position: Optional[int] = None,
-        parent_id: Optional[int] = None,
+        parent_id: Any = _UNSET,
         is_hidden: Optional[bool] = None,
         is_restricted: Optional[bool] = None,
         view_scope: Optional[str] = None,
@@ -461,6 +668,7 @@ class TagService:
             raise PermissionDenied("只有管理员可以编辑标签")
 
         tag = Tag.objects.get(id=tag_id)
+        was_restricted = bool(tag.is_restricted)
         next_view_scope = tag.view_scope
         next_start_scope = tag.start_discussion_scope
         next_reply_scope = tag.reply_scope
@@ -487,8 +695,7 @@ class TagService:
             if position is not None:
                 tag.position = position
 
-            if parent_id is not None:
-                # 检查父标签
+            if parent_id is not _UNSET:
                 if parent_id in ("", 0, "0", None):
                     tag.parent = None
                 else:
@@ -530,6 +737,8 @@ class TagService:
                 tag.slug = TagService.normalize_tag_slug(tag.name, tag.slug, exclude_tag_id=tag.id)
 
             tag.save()
+            if was_restricted and not tag.is_restricted:
+                TagService.delete_tag_permissions(tag)
             return tag
 
     @staticmethod
@@ -565,6 +774,90 @@ class TagService:
             Tag.objects.bulk_update(siblings, ["position"])
 
         return True
+
+    @staticmethod
+    def order_tags(order: List[dict], user: Any) -> List[Tag]:
+        if not user.is_staff:
+            raise PermissionDenied("只有管理员可以调整标签排序")
+        if not isinstance(order, list):
+            raise ValueError("标签排序数据必须是数组")
+
+        flattened: list[tuple[int, Optional[int], int]] = []
+        seen_ids: set[int] = set()
+
+        for parent_index, item in enumerate(order):
+            if not isinstance(item, dict):
+                raise ValueError("标签排序项格式错误")
+            parent_id = TagService._normalize_order_tag_id(item.get("id"))
+            if parent_id is None:
+                raise ValueError("标签排序项缺少标签 ID")
+            if parent_id in seen_ids:
+                raise ValueError("标签排序不能包含重复标签")
+            seen_ids.add(parent_id)
+            flattened.append((parent_id, None, parent_index))
+
+            children = item.get("children", [])
+            if children is None:
+                children = []
+            if not isinstance(children, list):
+                raise ValueError("子标签排序数据必须是数组")
+            for child_index, child in enumerate(children):
+                child_id = TagService._normalize_order_tag_id(child)
+                if child_id is None:
+                    raise ValueError("子标签排序项缺少标签 ID")
+                if child_id == parent_id:
+                    raise ValueError("标签不能成为自己的子标签")
+                if child_id in seen_ids:
+                    raise ValueError("标签排序不能包含重复标签")
+                seen_ids.add(child_id)
+                flattened.append((child_id, parent_id, child_index))
+
+        if not flattened:
+            return list(Tag.objects.select_related("parent").all().order_by("position", "name", "id"))
+
+        tags_by_id = {
+            tag.id: tag
+            for tag in Tag.objects.select_related("parent").filter(id__in=seen_ids)
+        }
+        missing_ids = sorted(seen_ids - set(tags_by_id))
+        if missing_ids:
+            raise ValueError(f"标签不存在: {', '.join(str(item) for item in missing_ids)}")
+
+        with transaction.atomic():
+            for tag_id, parent_id, position in flattened:
+                tag = tags_by_id[tag_id]
+                parent = tags_by_id[parent_id] if parent_id is not None else None
+                if parent is not None:
+                    TagService.validate_parent_assignment(tag, parent)
+                    tag.parent = parent
+                else:
+                    tag.parent = None
+                tag.position = position
+
+            Tag.objects.bulk_update(tags_by_id.values(), ["parent_id", "position"])
+            TagService._compact_positions_for_all_levels()
+
+        return list(Tag.objects.select_related("parent").all().order_by("position", "name", "id"))
+
+    @staticmethod
+    def _normalize_order_tag_id(value) -> Optional[int]:
+        if isinstance(value, dict):
+            value = value.get("id")
+        try:
+            normalized = int(value)
+        except (TypeError, ValueError):
+            return None
+        return normalized if normalized > 0 else None
+
+    @staticmethod
+    def _compact_positions_for_all_levels() -> None:
+        parent_ids = [None, *Tag.objects.exclude(parent_id__isnull=True).values_list("parent_id", flat=True).distinct()]
+        for parent_id in parent_ids:
+            siblings = list(Tag.objects.filter(parent_id=parent_id).order_by("position", "name", "id"))
+            for index, sibling in enumerate(siblings):
+                sibling.position = index
+            if siblings:
+                Tag.objects.bulk_update(siblings, ["position"])
 
     @staticmethod
     def _would_create_cycle(tag: Tag, new_parent: Tag) -> bool:
@@ -616,6 +909,7 @@ class TagService:
             raise ValueError("该标签下还有讨论，无法删除")
 
         with transaction.atomic():
+            TagService.delete_tag_permissions(tag)
             tag.delete()
 
         return True

@@ -1,3 +1,4 @@
+from bias_core.extensions import ExtensionEventListenerDefinition
 from bias_core.extensions.runtime import (
     create_runtime_timeline_from_builder,
     dispatch_runtime_tag_stats_refresh,
@@ -9,6 +10,61 @@ from bias_ext_tags.backend.events import (
     DiscussionTagStatsRefreshEvent,
     TagStatsRefreshRequestedEvent,
 )
+
+
+def tag_event_listener_definitions():
+    return (
+        ExtensionEventListenerDefinition(
+            event_type="discussions.discussion.approved",
+            handler=handle_discussion_approved_tag_stats,
+            description="讨论审核通过后刷新关联标签统计。",
+        ),
+        ExtensionEventListenerDefinition(
+            event_type=DiscussionTagStatsRefreshEvent,
+            handler=handle_discussion_tag_stats_refresh,
+            description="刷新讨论关联标签统计。",
+        ),
+        ExtensionEventListenerDefinition(
+            event_type=TagStatsRefreshRequestedEvent,
+            handler=handle_tag_stats_refresh_requested,
+            description="调度标签统计刷新任务。",
+        ),
+    )
+
+
+def post_event_listener_definitions():
+    return (
+        ExtensionEventListenerDefinition(
+            event_type=DiscussionTaggedEvent,
+            handler=handle_discussion_tagged,
+            description="刷新标签统计并写入标签变更事件帖。",
+        ),
+        ExtensionEventListenerDefinition(
+            event_type="posts.post.created",
+            handler=handle_post_created_tag_stats,
+            description="回复发布后刷新讨论关联标签统计。",
+        ),
+        ExtensionEventListenerDefinition(
+            event_type="posts.post.approved",
+            handler=handle_post_approved_tag_stats,
+            description="回复审核通过后刷新讨论关联标签统计。",
+        ),
+        ExtensionEventListenerDefinition(
+            event_type="posts.post.deleted",
+            handler=handle_post_deleted_tag_stats,
+            description="回复删除后刷新讨论关联标签统计。",
+        ),
+        ExtensionEventListenerDefinition(
+            event_type="posts.post.hidden",
+            handler=handle_post_hidden_tag_stats,
+            description="回复隐藏状态变更后刷新讨论关联标签统计。",
+        ),
+        ExtensionEventListenerDefinition(
+            event_type="posts.post.rejected",
+            handler=handle_post_rejected_tag_stats,
+            description="回复审核拒绝后刷新讨论关联标签统计。",
+        ),
+    )
 
 
 def enrich_realtime_tags_included_payload(*, discussion=None, post_payload=None, extension_context=None, payload=None):

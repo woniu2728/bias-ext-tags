@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from bias_core.extensions.platform import dispatch_forum_event_after_commit
-from bias_core.extensions.runtime import ensure_can_start_discussion_in_runtime_tags
+from bias_core.extensions.runtime import (
+    ensure_can_change_runtime_discussion_tags,
+    ensure_can_start_discussion_in_runtime_tags,
+)
 from bias_ext_tags.backend.events import DiscussionTaggedEvent, TagStatsRefreshRequestedEvent
 from bias_ext_tags.backend.tag_relationships import (
     get_discussion_tag_ids,
@@ -19,7 +22,10 @@ def set_discussion_tags_relationship(discussion, value, context: dict | None = N
     context = context or {}
     user = context.get("user")
     tag_ids = _relationship_tag_ids(value)
-    tags = tuple(ensure_can_start_discussion_in_runtime_tags(user, tag_ids))
+    if context.get("creating"):
+        tags = tuple(ensure_can_start_discussion_in_runtime_tags(user, tag_ids))
+    else:
+        tags = tuple(ensure_can_change_runtime_discussion_tags(user, discussion, tag_ids))
 
     result = replace_discussion_tags(discussion, tags)
     affected_tag_ids = tuple(result["affected_tag_ids"])

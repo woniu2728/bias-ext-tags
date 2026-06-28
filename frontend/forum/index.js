@@ -12,6 +12,7 @@ import DiscussionTaggedPostItem from './DiscussionTaggedPostItem.vue'
 import DiscussionComposerTagFields from './DiscussionComposerTagFields.vue'
 import DiscussionSidebarTagsSection from './DiscussionSidebarTagsSection.vue'
 import TagDiscussionModal from './TagDiscussionModal.vue'
+import { createTagSearchSource } from './tagSearchSource.js'
 import { TagModel } from './tagModel.js'
 import { buildTagPath, flattenTags, normalizeTag, unwrapTagList } from './tagUtils.js'
 
@@ -425,6 +426,26 @@ function registerTagsForum(forum) {
     }),
   })
 
+  forum.uiCopy({
+    key: 'search-section-tags-title',
+    moduleId: 'tags',
+    order: 479,
+    surfaces: ['search-section-tags-title'],
+    resolve: () => ({
+      text: '标签',
+    }),
+  })
+
+  forum.uiCopy({
+    key: 'search-tag-result-discussions',
+    moduleId: 'tags',
+    order: 479,
+    surfaces: ['search-tag-result-discussions'],
+    resolve: ({ count }) => ({
+      text: `${Number(count || 0)} 条讨论`,
+    }),
+  })
+
   forum.searchModalSection({
     key: 'popular-tags',
     moduleId: 'tags',
@@ -462,6 +483,8 @@ function registerTagsForum(forum) {
       }
     },
   })
+
+  forum.searchSource(createTagSearchSource())
 
   forum.uiCopy({
     key: 'tags-page-hero-title',

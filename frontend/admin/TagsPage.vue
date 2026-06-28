@@ -730,8 +730,11 @@ async function moveTag(tag, direction) {
 
   movingTagId.value = tag.id
   try {
-    const data = await adminApi.post(`/admin/tags/${tag.id}/move`, { direction })
-    tags.value = Array.isArray(data) ? data : tags.value
+    const reorderedTags = reorderTagLocally(tags.value, tag, direction)
+    const data = await adminApi.post('/admin/tags/order', {
+      order: buildTagOrderPayload(reorderedTags),
+    })
+    tags.value = normalizeTagListResponse(data, tags.value)
   } catch (error) {
     const errorMsg = error.response?.data?.error
       || error.response?.data?.detail
@@ -822,6 +825,39 @@ function buildTagTree(sourceTags) {
 
   sortTagNodes(roots)
   return roots
+}
+
+function buildTagOrderPayload(sourceTags) {
+  return buildTagTree(sourceTags).map(parent => ({
+    id: parent.id,
+    children: parent.children.map(child => child.id),
+  }))
+}
+
+function reorderTagLocally(sourceTags, targetTag, direction) {
+  const siblingRows = getSiblingRows(targetTag)
+  const currentIndex = siblingRows.findIndex(row => row.tag.id === targetTag.id)
+  const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1
+  if (currentIndex < 0 || targetIndex < 0 || targetIndex >= siblingRows.length) {
+    return sourceTags
+  }
+
+  const orderedSiblings = siblingRows.map(row => row.tag)
+  const [moved] = orderedSiblings.splice(currentIndex, 1)
+  orderedSiblings.splice(targetIndex, 0, moved)
+
+  const positions = new Map(orderedSiblings.map((item, index) => [item.id, index]))
+  return sourceTags.map(item => (
+    positions.has(item.id)
+      ? { ...item, position: positions.get(item.id) }
+      : item
+  ))
+}
+
+function normalizeTagListResponse(response, fallback = []) {
+  if (Array.isArray(response)) return response
+  if (Array.isArray(response?.data)) return response.data
+  return fallback
 }
 
 function sortTagNodes(nodes) {

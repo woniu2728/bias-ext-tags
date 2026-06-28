@@ -12,6 +12,8 @@ from bias_core.extensions.runtime import (
     dispatch_runtime_tag_stats_refresh,
     get_runtime_tag_scope_label,
     move_runtime_tag,
+    order_runtime_tags,
+    update_runtime_tag,
     validate_runtime_tag_parent_assignment,
     validate_runtime_tag_scope_configuration,
 )
@@ -114,6 +116,34 @@ def create_admin_tag(request, payload: dict = Body(...)):
         return api_error(str(exc), status=400)
 
 
+@router.post("/tags/order", auth=AccessTokenAuth(), tags=["Admin"])
+def order_admin_tags(request, payload: dict = Body(...)):
+    denied = require_staff(request)
+    if denied:
+        return denied
+
+    try:
+        if not isinstance(payload, dict) or "order" not in payload:
+            raise ValueError("缺少标签排序数据")
+        tags = order_runtime_tags(
+            order=payload.get("order"),
+            user=request.auth,
+        )
+        log_admin_action(
+            request,
+            "admin.tag.order",
+            target_type="tag",
+            data={"ordered_count": len(payload.get("order") or [])},
+        )
+        return {
+            "data": [serialize_admin_tag(item) for item in tags],
+        }
+    except ValueError as exc:
+        return api_error(str(exc), status=400)
+    except Exception as exc:
+        return api_error(str(exc), status=400)
+
+
 @router.put("/tags/{tag_id}", auth=AccessTokenAuth(), tags=["Admin"])
 def update_admin_tag(request, tag_id: int, payload: dict = Body(...)):
     denied = require_staff(request)
@@ -121,56 +151,39 @@ def update_admin_tag(request, tag_id: int, payload: dict = Body(...)):
         return denied
 
     try:
-        tag = get_object_or_404(Tag, id=tag_id)
+        get_object_or_404(Tag, id=tag_id)
         normalized = normalize_optional_tag_parent(payload)
-        next_view_scope = tag.view_scope
-        next_start_scope = tag.start_discussion_scope
-        next_reply_scope = tag.reply_scope
+        update_payload = {}
 
         if "name" in normalized:
             name = (normalized.get("name") or "").strip()
             if not name:
                 raise ValueError("标签名称不能为空")
-            tag.name = name
+            update_payload["name"] = name
         if "slug" in normalized:
-            tag.slug = (normalized.get("slug") or "").strip()
+            update_payload["slug"] = (normalized.get("slug") or "").strip()
         if "description" in normalized:
-            tag.description = normalized.get("description") or ""
+            update_payload["description"] = normalized.get("description") or ""
         if "color" in normalized:
-            tag.color = normalized.get("color") or "#888"
+            update_payload["color"] = normalized.get("color") or "#888"
         if "icon" in normalized:
-            tag.icon = (normalized.get("icon") or "").strip()
+            update_payload["icon"] = (normalized.get("icon") or "").strip()
         if "position" in normalized and normalized.get("position") is not None:
-            tag.position = int(normalized["position"])
+            update_payload["position"] = int(normalized["position"])
         if "parent_id" in normalized:
-            parent_id = normalized.get("parent_id")
-            if parent_id is None:
-                tag.parent = None
-            else:
-                parent = get_object_or_404(Tag, id=parent_id)
-                validate_runtime_tag_parent_assignment(tag, parent)
-                tag.parent = parent
+            update_payload["parent_id"] = normalized.get("parent_id")
         if "is_hidden" in normalized:
-            tag.is_hidden = bool(normalized["is_hidden"])
+            update_payload["is_hidden"] = bool(normalized["is_hidden"])
         if "is_restricted" in normalized:
-            tag.is_restricted = bool(normalized["is_restricted"])
+            update_payload["is_restricted"] = bool(normalized["is_restricted"])
         if "view_scope" in normalized:
-            next_view_scope = normalized.get("view_scope")
+            update_payload["view_scope"] = normalized.get("view_scope")
         if "start_discussion_scope" in normalized:
-            next_start_scope = normalized.get("start_discussion_scope")
+            update_payload["start_discussion_scope"] = normalized.get("start_discussion_scope")
         if "reply_scope" in normalized:
-            next_reply_scope = normalized.get("reply_scope")
-        (
-            tag.view_scope,
-            tag.start_discussion_scope,
-            tag.reply_scope,
-        ) = validate_runtime_tag_scope_configuration(
-            next_view_scope,
-            next_start_scope,
-            next_reply_scope,
-        )
-        tag.save()
-        tag.refresh_from_db()
+            update_payload["reply_scope"] = normalized.get("reply_scope")
+        tag = update_runtime_tag(tag_id, request.auth, **update_payload)
+        tag = Tag.objects.select_related("parent").get(id=tag.id)
         log_admin_action(
             request,
             "admin.tag.update",

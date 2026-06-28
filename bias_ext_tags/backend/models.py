@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import models
 
 
@@ -78,4 +79,30 @@ class DiscussionTag(models.Model):
 
     def __str__(self):
         return f"{self.discussion.title} - {self.tag.name}"
+
+
+class TagState(models.Model):
+    """
+    用户-标签状态，由 tags 扩展拥有。
+
+    对齐 tag_user 用户态表：每个用户在每个标签上可以有独立的
+    marked_as_read_at 和 is_hidden 状态，不把用户态写入 Tag 本体。
+    """
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="tag_states")
+    tag = models.ForeignKey(Tag, on_delete=models.CASCADE, related_name="user_states")
+    marked_as_read_at = models.DateTimeField(null=True, blank=True)
+    is_hidden = models.BooleanField(default=False)
+
+    class Meta:
+        app_label = "tags"
+        db_table = "tag_user"
+        unique_together = [["user", "tag"]]
+        indexes = [
+            models.Index(fields=["user"], name="tag_user_user_id_0f20f5_idx"),
+            models.Index(fields=["tag"], name="tag_user_tag_id_8e3d59_idx"),
+        ]
+
+    def __str__(self):
+        return f"{self.user_id} - {self.tag_id}"
 
