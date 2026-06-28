@@ -191,6 +191,7 @@ def tag_resource_endpoints():
             path="/tags",
             absolute_path=True,
             auth_required=True,
+            forum_permission="tag.create",
         ),
         ResourceEndpointDefinition(
             resource="tag",
@@ -238,6 +239,7 @@ def tag_resource_endpoints():
             path="/tags/{object_id}",
             absolute_path=True,
             auth_required=True,
+            forum_permission="tag.edit",
         ),
         ResourceEndpointDefinition(
             resource="tag",
@@ -248,6 +250,7 @@ def tag_resource_endpoints():
             path="/tags/{object_id}",
             absolute_path=True,
             auth_required=True,
+            forum_permission="tag.delete",
         ),
     )
 

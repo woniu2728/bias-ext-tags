@@ -159,6 +159,42 @@ class TagsExtensionRuntimeTests(ExtensionRuntimeTestMixin, TestCase):
 
         self.assertIn("bypassTagCounts", permissions)
         self.assertEqual(permissions["bypassTagCounts"].section, "tags")
+        self.assertIn("tag.create", permissions)
+        self.assertIn("tag.edit", permissions)
+        self.assertIn("tag.delete", permissions)
+        self.assertEqual(permissions["tag.delete"].required_permissions, ("tag.edit",))
+
+    def test_tags_write_resource_endpoints_declare_forum_permissions(self):
+        application = self.bootstrap_extensions("tags")
+        endpoints = {
+            endpoint.endpoint: endpoint
+            for endpoint in application.resources.get_endpoints("tag")
+        }
+
+        self.assertEqual(endpoints["create"].forum_permission, "tag.create")
+        self.assertEqual(endpoints["update"].forum_permission, "tag.edit")
+        self.assertEqual(endpoints["delete"].forum_permission, "tag.delete")
+
+    def test_staff_users_receive_tag_management_forum_permissions(self):
+        from bias_core.forum_permissions import has_forum_permission
+
+        self.bootstrap_extensions("tags")
+        staff = User.objects.create_user(
+            username="tag-staff-permissions",
+            email="tag-staff-permissions@example.com",
+            password="password123",
+            is_staff=True,
+        )
+        member = User.objects.create_user(
+            username="tag-member-permissions",
+            email="tag-member-permissions@example.com",
+            password="password123",
+        )
+
+        self.assertTrue(has_forum_permission(staff, "tag.create"))
+        self.assertTrue(has_forum_permission(staff, "tag.edit"))
+        self.assertTrue(has_forum_permission(staff, "tag.delete"))
+        self.assertFalse(has_forum_permission(member, "tag.create"))
 
     def test_tags_posts_integration_is_optional(self):
         self.disable_extension_for_test("posts")
@@ -841,6 +877,55 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         slugs = {tag["slug"] for tag in response.json()["data"]}
         self.assertEqual(slugs, {"public-tag", "members-tag"})
+
+    def test_tag_write_resource_endpoints_require_declared_permissions(self):
+        create_response = self.client.post(
+            "/api/tags",
+            data=json.dumps({"name": "成员创建标签", "slug": "member-create-tag"}),
+            content_type="application/json",
+            **self.auth_header(self.member),
+        )
+        update_response = self.client.patch(
+            f"/api/tags/{self.public_tag.id}",
+            data=json.dumps({"name": "成员改名"}),
+            content_type="application/json",
+            **self.auth_header(self.member),
+        )
+        delete_response = self.client.delete(
+            f"/api/tags/{self.public_tag.id}",
+            **self.auth_header(self.member),
+        )
+
+        self.assertEqual(create_response.status_code, 403, create_response.content)
+        self.assertEqual(update_response.status_code, 403, update_response.content)
+        self.assertEqual(delete_response.status_code, 403, delete_response.content)
+
+    def test_staff_can_use_tag_write_resource_endpoints(self):
+        create_response = self.client.post(
+            "/api/tags",
+            data=json.dumps({"name": "资源端点标签", "slug": "resource-endpoint-tag"}),
+            content_type="application/json",
+            **self.auth_header(self.admin),
+        )
+
+        self.assertEqual(create_response.status_code, 200, create_response.content)
+        tag_id = create_response.json()["id"]
+
+        update_response = self.client.patch(
+            f"/api/tags/{tag_id}",
+            data=json.dumps({"name": "资源端点标签更新"}),
+            content_type="application/json",
+            **self.auth_header(self.admin),
+        )
+        delete_response = self.client.delete(
+            f"/api/tags/{tag_id}",
+            **self.auth_header(self.admin),
+        )
+
+        self.assertEqual(update_response.status_code, 200, update_response.content)
+        self.assertEqual(update_response.json()["name"], "资源端点标签更新")
+        self.assertEqual(delete_response.status_code, 200, delete_response.content)
+        self.assertFalse(Tag.objects.filter(id=tag_id).exists())
 
     def test_public_tag_payload_hides_admin_only_access_fields(self):
         tag = Tag.objects.create(

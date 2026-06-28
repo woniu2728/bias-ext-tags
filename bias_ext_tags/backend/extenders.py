@@ -6,6 +6,7 @@ from bias_core.extensions import (
     ConditionalExtender,
     DiscussionLifecycleExtender,
     EventListenersExtender,
+    ForumPermissionExtender,
     ForumCapabilitiesExtender,
     LifecycleExtender,
     ModelExtender,
@@ -55,6 +56,7 @@ from bias_ext_tags.backend.model_contracts import (
 )
 from bias_ext_tags.backend.models import DiscussionTag, Tag, TagState
 from bias_ext_tags.backend.policies import DiscussionPolicy, PostPolicy, TagPolicy
+from bias_ext_tags.backend.permissions import grant_staff_tag_management_permissions
 from bias_ext_tags.backend.post_lifecycle import (
     apply_post_approved,
     apply_post_created,
@@ -87,6 +89,11 @@ def frontend_extenders():
 
 def admin_extenders():
     return (
+        ForumPermissionExtender().checker(
+            "tag-management",
+            grant_staff_tag_management_permissions,
+            description="Grant tag management permissions to staff users.",
+        ),
         AdminSurfaceExtender(
             permissions=permission_definitions(),
             admin_pages=admin_page_definitions(),

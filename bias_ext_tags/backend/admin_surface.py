@@ -19,6 +19,36 @@ def admin_page_definitions():
 def permission_definitions():
     return (
         PermissionDefinition(
+            code="tag.create",
+            label="创建标签",
+            section="tags",
+            section_label="标签",
+            module_id=EXTENSION_ID,
+            icon="fas fa-plus",
+            description="允许通过标签资源端点创建标签。",
+            required_permissions=("viewForum",),
+        ),
+        PermissionDefinition(
+            code="tag.edit",
+            label="编辑标签",
+            section="tags",
+            section_label="标签",
+            module_id=EXTENSION_ID,
+            icon="fas fa-pencil-alt",
+            description="允许通过标签资源端点编辑标签。",
+            required_permissions=("viewForum",),
+        ),
+        PermissionDefinition(
+            code="tag.delete",
+            label="删除标签",
+            section="tags",
+            section_label="标签",
+            module_id=EXTENSION_ID,
+            icon="fas fa-trash",
+            description="允许通过标签资源端点删除标签。",
+            required_permissions=("tag.edit",),
+        ),
+        PermissionDefinition(
             code="bypassTagCounts",
             label="绕过标签数量限制",
             section="tags",
