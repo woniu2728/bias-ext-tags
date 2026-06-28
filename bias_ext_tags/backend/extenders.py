@@ -55,7 +55,7 @@ from bias_ext_tags.backend.model_contracts import (
 )
 from bias_ext_tags.backend.models import DiscussionTag, Tag, TagState
 from bias_ext_tags.backend.policies import DiscussionPolicy, PostPolicy, TagPolicy
-from bias_ext_tags.backend.post_lifecycle import apply_post_created
+from bias_ext_tags.backend.post_lifecycle import apply_post_created, apply_post_hidden
 from bias_ext_tags.backend.resources import (
     discussion_resource_field_definitions,
     discussion_resource_relationship_definitions,
@@ -260,7 +260,8 @@ def post_integration_extenders():
         PostLifecycleExtender().handler(
             "tags",
             apply_created=apply_post_created,
-            description="回复发布后增量维护关联标签最后活跃讨论。",
+            apply_hidden=apply_post_hidden,
+            description="回复发布和隐藏状态变化后增量维护关联标签最后活跃讨论。",
         ),
         RealtimeExtender().broadcast_discussion_event(
             DiscussionTaggedEvent,

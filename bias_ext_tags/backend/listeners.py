@@ -138,7 +138,7 @@ def handle_post_deleted_tag_stats(event) -> None:
 
 
 def handle_post_hidden_tag_stats(event) -> None:
-    refresh_runtime_discussion_tag_stats(event.discussion_id)
+    return None
 
 
 def handle_post_rejected_tag_stats(event) -> None:

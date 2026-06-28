@@ -468,6 +468,110 @@ class TagStatsTests(TestCase):
         refresh_tag_stats.assert_not_called()
         refresh_discussion_tag_stats.assert_not_called()
 
+    def test_hiding_non_latest_reply_does_not_refresh_tag_stats(self):
+        admin = User.objects.create_superuser(
+            username="tag-post-hide-admin",
+            email="tag-post-hide-admin@example.com",
+            password="password123",
+        )
+        with self.captureOnCommitCallbacks(execute=True):
+            older_discussion = create_runtime_discussion(
+                title="较早回复讨论",
+                content="首帖",
+                user=self.user,
+                extension_payload=discussion_tags_payload([self.tag.id]),
+            )
+        older_reply = create_runtime_post(
+            discussion_id=older_discussion.id,
+            content="较早回复",
+            user=self.user,
+        )
+        with self.captureOnCommitCallbacks(execute=True):
+            newer_discussion = create_runtime_discussion(
+                title="较新回复讨论",
+                content="首帖",
+                user=self.user,
+                extension_payload=discussion_tags_payload([self.tag.id]),
+            )
+
+        with patch("bias_ext_tags.backend.services.TagService.refresh_tag_stats") as refresh_tag_stats:
+            with patch("bias_ext_tags.backend.listeners.refresh_runtime_discussion_tag_stats") as refresh_discussion_tag_stats:
+                with self.captureOnCommitCallbacks(execute=True):
+                    set_runtime_post_hidden_state(older_reply, admin, True)
+
+        self.tag.refresh_from_db()
+        self.assertEqual(self.tag.last_posted_discussion_id, newer_discussion.id)
+        refresh_tag_stats.assert_not_called()
+        refresh_discussion_tag_stats.assert_not_called()
+
+    def test_hiding_latest_reply_rebuilds_tag_latest_from_updated_discussion(self):
+        admin = User.objects.create_superuser(
+            username="tag-post-hide-latest-admin",
+            email="tag-post-hide-latest-admin@example.com",
+            password="password123",
+        )
+        with self.captureOnCommitCallbacks(execute=True):
+            discussion = create_runtime_discussion(
+                title="隐藏最后回复",
+                content="首帖",
+                user=self.user,
+                extension_payload=discussion_tags_payload([self.tag.id]),
+            )
+        reply = create_runtime_post(
+            discussion_id=discussion.id,
+            content="最后回复",
+            user=self.user,
+        )
+
+        self.tag.refresh_from_db()
+        discussion.refresh_from_db()
+        self.assertEqual(self.tag.last_posted_discussion_id, discussion.id)
+        self.assertEqual(self.tag.last_posted_at, discussion.last_posted_at)
+
+        with patch("bias_ext_tags.backend.listeners.refresh_runtime_discussion_tag_stats") as refresh_discussion_tag_stats:
+            with self.captureOnCommitCallbacks(execute=True):
+                set_runtime_post_hidden_state(reply, admin, True)
+
+        discussion.refresh_from_db()
+        self.tag.refresh_from_db()
+        self.assertEqual(self.tag.last_posted_discussion_id, discussion.id)
+        self.assertEqual(self.tag.last_posted_at, discussion.last_posted_at)
+        self.assertLess(self.tag.last_posted_at, reply.created_at)
+        refresh_discussion_tag_stats.assert_not_called()
+
+    def test_restoring_reply_updates_tag_latest_without_refresh(self):
+        admin = User.objects.create_superuser(
+            username="tag-post-restore-admin",
+            email="tag-post-restore-admin@example.com",
+            password="password123",
+        )
+        with self.captureOnCommitCallbacks(execute=True):
+            discussion = create_runtime_discussion(
+                title="恢复回复",
+                content="首帖",
+                user=self.user,
+                extension_payload=discussion_tags_payload([self.tag.id]),
+            )
+        reply = create_runtime_post(
+            discussion_id=discussion.id,
+            content="可恢复回复",
+            user=self.user,
+        )
+        with self.captureOnCommitCallbacks(execute=True):
+            set_runtime_post_hidden_state(reply, admin, True)
+
+        with patch("bias_ext_tags.backend.services.TagService.refresh_tag_stats") as refresh_tag_stats:
+            with patch("bias_ext_tags.backend.listeners.refresh_runtime_discussion_tag_stats") as refresh_discussion_tag_stats:
+                with self.captureOnCommitCallbacks(execute=True):
+                    set_runtime_post_hidden_state(reply, admin, False)
+
+        self.tag.refresh_from_db()
+        self.assertEqual(self.tag.last_posted_discussion_id, discussion.id)
+        discussion.refresh_from_db()
+        self.assertEqual(self.tag.last_posted_at, discussion.last_posted_at)
+        refresh_tag_stats.assert_not_called()
+        refresh_discussion_tag_stats.assert_not_called()
+
 
 class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
     def _pre_setup(self):
