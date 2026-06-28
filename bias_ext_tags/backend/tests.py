@@ -2020,7 +2020,7 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertIn("tags", payload)
         self.assertEqual(payload["tags"][0]["slug"], tag.slug)
 
-    def test_restricted_tag_discussion_edit_requires_tag_specific_permission(self):
+    def test_restricted_tag_discussion_rename_requires_tag_specific_permission_for_non_author(self):
         restricted_tag = Tag.objects.create(
             name="受限编辑标签",
             slug="restricted-edit-tag",
@@ -2041,7 +2041,7 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
             is_email_confirmed=True,
         )
         editor_group = Group.objects.create(name="RestrictedDiscussionEditor", color="#4d698e")
-        Permission.objects.create(group=editor_group, permission="discussion.edit")
+        Permission.objects.create(group=editor_group, permission="discussion.rename")
         Permission.objects.create(group=editor_group, permission=f"tag{restricted_tag.id}.viewForum")
         editor.user_groups.add(editor_group)
         discussion = create_runtime_discussion(
@@ -2059,9 +2059,9 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
         )
 
         self.assertEqual(denied_response.status_code, 403, denied_response.content)
-        self.assertIn("没有权限编辑", denied_response.json()["error"])
+        self.assertIn("没有权限修改讨论标题", denied_response.json()["error"])
 
-        Permission.objects.create(group=editor_group, permission=f"tag{restricted_tag.id}.discussion.edit")
+        Permission.objects.create(group=editor_group, permission=f"tag{restricted_tag.id}.discussion.rename")
         if hasattr(editor, "_forum_permission_cache"):
             delattr(editor, "_forum_permission_cache")
 
@@ -2074,6 +2074,38 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
 
         self.assertEqual(allowed_response.status_code, 200, allowed_response.content)
         self.assertEqual(allowed_response.json()["title"], "Allowed edit")
+
+    def test_author_can_rename_own_discussion_in_restricted_tag_without_tag_specific_permission(self):
+        restricted_tag = Tag.objects.create(
+            name="作者受限重命名标签",
+            slug="restricted-author-rename-tag",
+            is_restricted=True,
+            view_scope=Tag.ACCESS_PUBLIC,
+            start_discussion_scope=Tag.ACCESS_MEMBERS,
+            reply_scope=Tag.ACCESS_MEMBERS,
+        )
+        author_group = Group.objects.create(name="RestrictedAuthorRenamer", color="#4d698e")
+        Permission.objects.create(group=author_group, permission="startDiscussion")
+        Permission.objects.create(group=author_group, permission="discussion.reply")
+        Permission.objects.create(group=author_group, permission=f"tag{restricted_tag.id}.viewForum")
+        Permission.objects.create(group=author_group, permission=f"tag{restricted_tag.id}.startDiscussion")
+        self.author.user_groups.add(author_group)
+        discussion = create_runtime_discussion(
+            title="Author restricted rename original",
+            content="Original content",
+            user=self.author,
+            extension_payload=discussion_tags_payload([restricted_tag.id]),
+        )
+
+        response = self.client.patch(
+            f"/api/discussions/{discussion.id}",
+            data=json.dumps({"title": "Author restricted rename allowed"}),
+            content_type="application/json",
+            **self.auth_header(self.author),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["title"], "Author restricted rename allowed")
 
     def test_restricted_tag_discussion_delete_requires_tag_specific_permission(self):
         restricted_tag = Tag.objects.create(

@@ -148,7 +148,13 @@ class TagService:
         return all(TagService.can_reply_in_tag(tag, user) for tag in get_discussion_tags(discussion))
 
     @staticmethod
-    def restricted_discussion_ability_decision(discussion, user: Optional[Any], ability: str):
+    def restricted_discussion_ability_decision(
+        discussion,
+        user: Optional[Any],
+        ability: str,
+        *,
+        deny_without_permission: bool = True,
+    ):
         normalized = str(ability or "").strip()
         if not normalized:
             return None
@@ -162,7 +168,7 @@ class TagService:
         permission = normalized if normalized.startswith("discussion.") else f"discussion.{normalized}"
         for tag in restricted_tags:
             if not TagService.has_restricted_tag_permission(tag, user, permission):
-                return False
+                return False if deny_without_permission else None
         return True
 
     @staticmethod
