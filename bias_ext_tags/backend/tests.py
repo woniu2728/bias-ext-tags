@@ -22,6 +22,7 @@ from bias_core.extensions.runtime import (
     update_runtime_discussion,
 )
 from bias_core.extensions import ResourceEndpointDefinition, SearchFilterDefinition
+from bias_core.resource_objects import ResourceSearchCriteria
 from bias_core.extensions.testing import (
     AuditLog,
     ExtensionInstallation,
@@ -1501,6 +1502,25 @@ class TagSearchApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(payload["type"], "tag")
         self.assertEqual(payload["tag_total"], 2)
         self.assertEqual({item["id"] for item in payload["tags"]}, {matched_by_name.id, matched_by_slug.id})
+
+    def test_tag_fulltext_search_uses_id_subquery(self):
+        application = self.bootstrap_extensions("tags")
+        matched_by_name = Tag.objects.create(name="Subquery Support", slug="subquery-help")
+        matched_by_slug = Tag.objects.create(name="Docs", slug="subquery-support")
+        Tag.objects.create(name="Community Support", slug="community-support")
+
+        with CaptureQueriesContext(connection) as queries:
+            result = application.search.query(
+                Tag,
+                Tag.objects.all(),
+                ResourceSearchCriteria(filters={"q": "subquery"}, resource="tag"),
+                {"user": self.user},
+            )
+            result_ids = set(result.results.values_list("id", flat=True))
+
+        self.assertEqual(result_ids, {matched_by_name.id, matched_by_slug.id})
+        sql = " ".join(query["sql"].lower() for query in queries)
+        self.assertRegex(sql, r'"tags"\."id"\s+in\s+\(select')
 
     def test_search_api_all_includes_tag_section(self):
         Tag.objects.create(name="Support", slug="support")

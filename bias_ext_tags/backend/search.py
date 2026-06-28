@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from django.db.models import Exists, OuterRef, Q
+from django.db.models import Exists, OuterRef, Q, Subquery
 
 from bias_core.extensions.runtime import resolve_runtime_model_slugs
 from bias_ext_tags.backend.models import DiscussionTag, Tag
@@ -53,7 +53,10 @@ def apply_tag_fulltext_search(state, query: str, context: dict):
     value = str(query or "").strip()
     if not value:
         return state
-    return state.filter(Q(name__istartswith=value) | Q(slug__istartswith=value))
+    matching_tag_ids = Tag.objects.filter(
+        Q(name__istartswith=value) | Q(slug__istartswith=value),
+    ).values("id")
+    return state.filter(id__in=Subquery(matching_tag_ids))
 
 
 def search_tags(queryset, criteria, context: dict):
