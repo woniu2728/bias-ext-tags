@@ -200,6 +200,7 @@ def tag_resource_endpoints():
             methods=("GET",),
             path="/tags",
             absolute_path=True,
+            default_include=("parent",),
         ),
         ResourceEndpointDefinition(
             resource="tag",

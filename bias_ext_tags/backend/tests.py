@@ -1189,6 +1189,47 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(child_payload["parent"]["id"], self.public_tag.id)
         self.assertEqual(child_payload["parent"]["slug"], self.public_tag.slug)
 
+    def test_tag_index_default_includes_parent_relationship(self):
+        child = Tag.objects.create(
+            name="默认父关系子标签",
+            slug="default-parent-child",
+            parent=self.public_tag,
+        )
+
+        response = self.client.get("/api/tags", {"parent_id": self.public_tag.id})
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()["data"][0]
+        self.assertEqual(payload["id"], child.id)
+        self.assertEqual(payload["parent"]["id"], self.public_tag.id)
+        self.assertEqual(payload["parent"]["slug"], self.public_tag.slug)
+
+    def test_tag_index_default_parent_include_uses_select_related(self):
+        for index in range(4):
+            Tag.objects.create(
+                name=f"默认父关系批量子标签 {index}",
+                slug=f"default-parent-batch-child-{index}",
+                parent=self.public_tag,
+                position=index,
+            )
+
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get("/api/tags", {"parent_id": self.public_tag.id})
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(all(item["parent"]["id"] == self.public_tag.id for item in response.json()["data"]))
+        per_child_parent_queries = [
+            query["sql"]
+            for query in queries
+            if 'from "tags"' in query["sql"].lower()
+            and f'"tags"."id" = {self.public_tag.id}' in query["sql"]
+        ]
+        self.assertEqual(
+            per_child_parent_queries,
+            [],
+            "Tag index default parent include should use select_related instead of querying once per child tag.",
+        )
+
     def test_tag_list_children_include_uses_prefetched_children(self):
         for index in range(5):
             Tag.objects.create(
@@ -1208,7 +1249,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
             query["sql"]
             for query in queries
             if 'from "tags"' in query["sql"].lower()
-            and '"tags"."parent_id" =' in query["sql"].lower()
+            and re.search(r'where .*"tags"\."parent_id"\s*=\s*\d+', query["sql"].lower())
         ]
         self.assertEqual(
             per_parent_child_queries,

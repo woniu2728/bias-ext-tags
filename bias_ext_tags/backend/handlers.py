@@ -6,6 +6,7 @@ from django.db.models import Prefetch
 from bias_core.extensions.platform import api_error
 from bias_core.extensions.runtime import get_runtime_resource_registry
 from bias_core.extensions.platform import ResourceQueryOptions, parse_resource_query_options
+from bias_core.extensions.platform import merge_resource_includes
 from bias_ext_tags.backend.models import Tag
 from bias_ext_tags.backend.schemas import TagCreateSchema, TagUpdateSchema
 from bias_ext_tags.backend.services import TagService
@@ -13,6 +14,17 @@ from bias_ext_tags.backend.services import TagService
 
 def _get_resource_registry():
     return get_runtime_resource_registry()
+
+
+def _tag_resource_options(context, resource: str = "tag") -> ResourceQueryOptions:
+    options = context.get("resource_options") or parse_resource_query_options(context["request"], resource)
+    default_include = tuple(context.get("default_include") or ())
+    if not default_include:
+        return options
+    return ResourceQueryOptions(
+        includes=merge_resource_includes(default_include, options.includes),
+        fields=options.fields,
+    )
 
 
 def _build_tag_serialize_context(user=None, action="view"):
@@ -154,7 +166,7 @@ def dispatch_tag_create(context):
 def dispatch_tag_index(context):
     request = context["request"]
     user = context.get("user")
-    resource_options = parse_resource_query_options(request, "tag")
+    resource_options = _tag_resource_options(context)
     include_hidden = _tag_bool_query_value(context, "include_hidden", False)
     include_children = _tag_bool_query_value(context, "include_children", True)
     purpose = _tag_purpose_query_value(context)
@@ -207,7 +219,7 @@ def dispatch_tag_index(context):
 def dispatch_tag_popular(context):
     request = context["request"]
     user = context.get("user")
-    resource_options = parse_resource_query_options(request, "tag")
+    resource_options = _tag_resource_options(context)
     limit = _tag_int_query_value(context, "limit") or 10
     tags = TagService.filter_tags_for_user(
         Tag.objects.filter(is_hidden=False),
@@ -247,7 +259,7 @@ def _load_visible_tag(tag, user, resource_options):
 def dispatch_tag_show(context):
     request = context["request"]
     user = context.get("user")
-    resource_options = parse_resource_query_options(request, "tag")
+    resource_options = _tag_resource_options(context)
     tag = _load_visible_tag(TagService.get_tag_by_id(_tag_object_id(context)), user, resource_options)
     if tag is None:
         return api_error("标签不存在", status=404)
@@ -259,7 +271,7 @@ def dispatch_tag_show(context):
 def dispatch_tag_show_by_slug(context):
     request = context["request"]
     user = context.get("user")
-    resource_options = parse_resource_query_options(request, "tag")
+    resource_options = _tag_resource_options(context)
     slug = str(context.get("object_id") or "").strip()
     tag = TagService.get_tag_by_url_slug(slug)
     if tag is None:
