@@ -46,8 +46,11 @@ from bias_core.extensions.runtime import get_runtime_discussion_tag_model
 from bias_ext_tags.backend.services import TagService
 from bias_ext_tags.backend.resources import tag_resource_endpoints
 from bias_core.extensions.runtime import (
+    approve_runtime_post,
     create_runtime_post,
+    delete_runtime_post,
     get_runtime_post_model,
+    reject_runtime_post,
     set_runtime_post_hidden_state,
 )
 from bias_core.extensions.runtime import (
@@ -570,6 +573,139 @@ class TagStatsTests(TestCase):
         discussion.refresh_from_db()
         self.assertEqual(self.tag.last_posted_at, discussion.last_posted_at)
         refresh_tag_stats.assert_not_called()
+        refresh_discussion_tag_stats.assert_not_called()
+
+    def test_approving_reply_updates_tag_latest_without_refresh(self):
+        trusted_group = Group.objects.create(name="TagPendingReplyTrusted", color="#4d698e")
+        Permission.objects.create(group=trusted_group, permission="replyWithoutApproval")
+        admin = User.objects.create_superuser(
+            username="tag-post-approve-admin",
+            email="tag-post-approve-admin@example.com",
+            password="password123",
+        )
+        with self.captureOnCommitCallbacks(execute=True):
+            discussion = create_runtime_discussion(
+                title="审核回复标签",
+                content="首帖",
+                user=self.user,
+                extension_payload=discussion_tags_payload([self.tag.id]),
+            )
+        pending_reply = create_runtime_post(
+            discussion_id=discussion.id,
+            content="等待审核回复",
+            user=self.user,
+        )
+
+        self.tag.refresh_from_db()
+        initial_last_posted_at = self.tag.last_posted_at
+
+        with patch("bias_ext_tags.backend.services.TagService.refresh_tag_stats") as refresh_tag_stats:
+            with patch("bias_ext_tags.backend.listeners.refresh_runtime_discussion_tag_stats") as refresh_discussion_tag_stats:
+                with self.captureOnCommitCallbacks(execute=True):
+                    approve_runtime_post(pending_reply, admin)
+
+        discussion.refresh_from_db()
+        self.tag.refresh_from_db()
+        self.assertGreater(self.tag.last_posted_at, initial_last_posted_at)
+        self.assertEqual(self.tag.last_posted_at, discussion.last_posted_at)
+        self.assertEqual(self.tag.last_posted_discussion_id, discussion.id)
+        refresh_tag_stats.assert_not_called()
+        refresh_discussion_tag_stats.assert_not_called()
+
+    def test_rejecting_latest_reply_refreshes_only_latest_tags(self):
+        admin = User.objects.create_superuser(
+            username="tag-post-reject-admin",
+            email="tag-post-reject-admin@example.com",
+            password="password123",
+        )
+        with self.captureOnCommitCallbacks(execute=True):
+            discussion = create_runtime_discussion(
+                title="拒绝回复标签",
+                content="首帖",
+                user=self.user,
+                extension_payload=discussion_tags_payload([self.tag.id]),
+            )
+        reply = create_runtime_post(
+            discussion_id=discussion.id,
+            content="会被拒绝的回复",
+            user=self.user,
+        )
+
+        with patch("bias_ext_tags.backend.listeners.refresh_runtime_discussion_tag_stats") as refresh_discussion_tag_stats:
+            with self.captureOnCommitCallbacks(execute=True):
+                reject_runtime_post(reply, admin)
+
+        discussion.refresh_from_db()
+        self.tag.refresh_from_db()
+        self.assertEqual(self.tag.last_posted_discussion_id, discussion.id)
+        self.assertEqual(self.tag.last_posted_at, discussion.last_posted_at)
+        self.assertLess(self.tag.last_posted_at, reply.created_at)
+        refresh_discussion_tag_stats.assert_not_called()
+
+    def test_deleting_non_latest_reply_does_not_refresh_tag_stats(self):
+        admin = User.objects.create_superuser(
+            username="tag-post-delete-admin",
+            email="tag-post-delete-admin@example.com",
+            password="password123",
+        )
+        with self.captureOnCommitCallbacks(execute=True):
+            older_discussion = create_runtime_discussion(
+                title="删除非最新回复",
+                content="首帖",
+                user=self.user,
+                extension_payload=discussion_tags_payload([self.tag.id]),
+            )
+        old_reply = create_runtime_post(
+            discussion_id=older_discussion.id,
+            content="较早会删除回复",
+            user=self.user,
+        )
+        with self.captureOnCommitCallbacks(execute=True):
+            newer_discussion = create_runtime_discussion(
+                title="删除非最新回复之后的新讨论",
+                content="首帖",
+                user=self.user,
+                extension_payload=discussion_tags_payload([self.tag.id]),
+            )
+
+        with patch("bias_ext_tags.backend.services.TagService.refresh_tag_stats") as refresh_tag_stats:
+            with patch("bias_ext_tags.backend.listeners.refresh_runtime_discussion_tag_stats") as refresh_discussion_tag_stats:
+                with self.captureOnCommitCallbacks(execute=True):
+                    delete_runtime_post(old_reply.id, admin)
+
+        self.tag.refresh_from_db()
+        self.assertEqual(self.tag.last_posted_discussion_id, newer_discussion.id)
+        refresh_tag_stats.assert_not_called()
+        refresh_discussion_tag_stats.assert_not_called()
+
+    def test_deleting_latest_reply_refreshes_only_latest_tags(self):
+        admin = User.objects.create_superuser(
+            username="tag-post-delete-latest-admin",
+            email="tag-post-delete-latest-admin@example.com",
+            password="password123",
+        )
+        with self.captureOnCommitCallbacks(execute=True):
+            discussion = create_runtime_discussion(
+                title="删除最新回复",
+                content="首帖",
+                user=self.user,
+                extension_payload=discussion_tags_payload([self.tag.id]),
+            )
+        reply = create_runtime_post(
+            discussion_id=discussion.id,
+            content="最新会删除回复",
+            user=self.user,
+        )
+
+        with patch("bias_ext_tags.backend.listeners.refresh_runtime_discussion_tag_stats") as refresh_discussion_tag_stats:
+            with self.captureOnCommitCallbacks(execute=True):
+                delete_runtime_post(reply.id, admin)
+
+        discussion.refresh_from_db()
+        self.tag.refresh_from_db()
+        self.assertEqual(self.tag.last_posted_discussion_id, discussion.id)
+        self.assertEqual(self.tag.last_posted_at, discussion.last_posted_at)
+        self.assertLess(self.tag.last_posted_at, reply.created_at)
         refresh_discussion_tag_stats.assert_not_called()
 
 
