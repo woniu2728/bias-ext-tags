@@ -16,6 +16,7 @@ from bias_core.extensions.runtime import (
     delete_runtime_discussion,
     get_runtime_model_url_service,
     get_runtime_tag_state_model,
+    reject_runtime_discussion,
     set_runtime_discussion_hidden_state,
     to_runtime_model_slug,
     update_runtime_discussion,
@@ -369,11 +370,15 @@ class TagStatsTests(TestCase):
         self.assertEqual(self.tag.discussion_count, 0)
         self.assertIsNone(self.tag.last_posted_discussion)
 
-        with self.captureOnCommitCallbacks(execute=True):
-            approve_runtime_discussion(discussion, admin)
+        with patch("bias_ext_tags.backend.services.TagService.refresh_tag_stats") as refresh_tag_stats:
+            with patch("bias_ext_tags.backend.listeners.refresh_runtime_discussion_tag_stats") as refresh_discussion_tag_stats:
+                with self.captureOnCommitCallbacks(execute=True):
+                    approve_runtime_discussion(discussion, admin)
         self.tag.refresh_from_db()
         self.assertEqual(self.tag.discussion_count, 1)
         self.assertEqual(self.tag.last_posted_discussion_id, discussion.id)
+        refresh_tag_stats.assert_not_called()
+        refresh_discussion_tag_stats.assert_not_called()
 
     def test_hiding_non_latest_discussion_updates_tag_count_without_refresh(self):
         admin = User.objects.create_superuser(
@@ -432,6 +437,68 @@ class TagStatsTests(TestCase):
         self.tag.refresh_from_db()
         self.assertEqual(self.tag.discussion_count, 1)
         self.assertEqual(self.tag.last_posted_discussion_id, older_discussion.id)
+
+    def test_rejecting_non_latest_discussion_updates_tag_count_without_refresh(self):
+        admin = User.objects.create_superuser(
+            username="tag-reject-admin",
+            email="tag-reject-admin@example.com",
+            password="password123",
+        )
+        with self.captureOnCommitCallbacks(execute=True):
+            older_discussion = create_runtime_discussion(
+                title="较早拒绝标签讨论",
+                content="较早内容",
+                user=self.user,
+                extension_payload=discussion_tags_payload([self.tag.id]),
+            )
+        with self.captureOnCommitCallbacks(execute=True):
+            newer_discussion = create_runtime_discussion(
+                title="较新拒绝标签讨论",
+                content="较新内容",
+                user=self.user,
+                extension_payload=discussion_tags_payload([self.tag.id]),
+            )
+
+        with patch("bias_ext_tags.backend.services.TagService.refresh_tag_stats") as refresh_tag_stats:
+            with patch("bias_ext_tags.backend.listeners.refresh_runtime_discussion_tag_stats") as refresh_discussion_tag_stats:
+                with self.captureOnCommitCallbacks(execute=True):
+                    reject_runtime_discussion(older_discussion, admin)
+
+        self.tag.refresh_from_db()
+        self.assertEqual(self.tag.discussion_count, 1)
+        self.assertEqual(self.tag.last_posted_discussion_id, newer_discussion.id)
+        refresh_tag_stats.assert_not_called()
+        refresh_discussion_tag_stats.assert_not_called()
+
+    def test_rejecting_latest_discussion_refreshes_tag_latest_discussion(self):
+        admin = User.objects.create_superuser(
+            username="tag-reject-latest-admin",
+            email="tag-reject-latest-admin@example.com",
+            password="password123",
+        )
+        with self.captureOnCommitCallbacks(execute=True):
+            older_discussion = create_runtime_discussion(
+                title="较早 latest 拒绝标签讨论",
+                content="较早内容",
+                user=self.user,
+                extension_payload=discussion_tags_payload([self.tag.id]),
+            )
+        with self.captureOnCommitCallbacks(execute=True):
+            newer_discussion = create_runtime_discussion(
+                title="较新 latest 拒绝标签讨论",
+                content="较新内容",
+                user=self.user,
+                extension_payload=discussion_tags_payload([self.tag.id]),
+            )
+
+        with patch("bias_ext_tags.backend.listeners.refresh_runtime_discussion_tag_stats") as refresh_discussion_tag_stats:
+            with self.captureOnCommitCallbacks(execute=True):
+                reject_runtime_discussion(newer_discussion, admin)
+
+        self.tag.refresh_from_db()
+        self.assertEqual(self.tag.discussion_count, 1)
+        self.assertEqual(self.tag.last_posted_discussion_id, older_discussion.id)
+        refresh_discussion_tag_stats.assert_not_called()
 
     def test_create_tag_generates_slug_when_missing(self):
         admin = User.objects.create_superuser(

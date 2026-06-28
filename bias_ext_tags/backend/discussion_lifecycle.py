@@ -1,10 +1,7 @@
 from __future__ import annotations
 
 from bias_core.extensions.platform import dispatch_forum_event_after_commit
-from bias_ext_tags.backend.events import (
-    DiscussionTagStatsRefreshEvent,
-    TagStatsRefreshRequestedEvent,
-)
+from bias_ext_tags.backend.events import TagStatsRefreshRequestedEvent
 from bias_ext_tags.backend.tag_relationships import get_discussion_tag_ids
 from bias_ext_tags.backend.services import TagService
 
@@ -85,16 +82,30 @@ def apply_discussion_hidden(*, discussion, state: dict | None = None, context: d
 
 
 def apply_discussion_approved(*, discussion, state: dict | None = None, context: dict | None = None, **kwargs) -> dict:
-    if not (context or {}).get("was_counted"):
+    if (context or {}).get("was_counted"):
         return {}
-    dispatch_forum_event_after_commit(
-        DiscussionTagStatsRefreshEvent(discussion_id=discussion.id)
-    )
-    return {"discussion_id": discussion.id}
+    tag_ids = get_discussion_tag_ids(discussion)
+    if not tag_ids:
+        return {}
+    TagService.increment_tag_stats_for_discussion(discussion, tag_ids)
+    return {
+        "discussion_id": discussion.id,
+        "affected_tag_ids": tag_ids,
+    }
 
 
 def apply_discussion_rejected(*, discussion, state: dict | None = None, context: dict | None = None, **kwargs) -> dict:
-    dispatch_forum_event_after_commit(
-        DiscussionTagStatsRefreshEvent(discussion_id=discussion.id)
+    if not (context or {}).get("was_counted"):
+        return {}
+    tag_ids = get_discussion_tag_ids(discussion)
+    if not tag_ids:
+        return {}
+    TagService.adjust_tag_stats_for_discussion_visibility(
+        discussion,
+        tag_ids,
+        is_hidden=True,
     )
-    return {"discussion_id": discussion.id}
+    return {
+        "discussion_id": discussion.id,
+        "affected_tag_ids": tag_ids,
+    }

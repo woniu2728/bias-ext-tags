@@ -110,7 +110,7 @@ def _merge_tag_payload(target: dict, tag, *, fallback_discussion=None) -> None:
 
 
 def handle_discussion_approved_tag_stats(event) -> None:
-    refresh_runtime_discussion_tag_stats(event.discussion_id)
+    return None
 
 
 def handle_discussion_tagged(event: DiscussionTaggedEvent) -> None:
