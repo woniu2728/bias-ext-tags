@@ -2020,6 +2020,119 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertIn("tags", payload)
         self.assertEqual(payload["tags"][0]["slug"], tag.slug)
 
+    def test_restricted_tag_discussion_edit_requires_tag_specific_permission(self):
+        restricted_tag = Tag.objects.create(
+            name="受限编辑标签",
+            slug="restricted-edit-tag",
+            is_restricted=True,
+            view_scope=Tag.ACCESS_PUBLIC,
+            start_discussion_scope=Tag.ACCESS_MEMBERS,
+            reply_scope=Tag.ACCESS_MEMBERS,
+        )
+        admin = User.objects.create_superuser(
+            username="restricted-edit-admin",
+            email="restricted-edit-admin@example.com",
+            password="password123",
+        )
+        editor = User.objects.create_user(
+            username="restricted-edit-user",
+            email="restricted-edit-user@example.com",
+            password="password123",
+            is_email_confirmed=True,
+        )
+        editor_group = Group.objects.create(name="RestrictedDiscussionEditor", color="#4d698e")
+        Permission.objects.create(group=editor_group, permission="discussion.edit")
+        Permission.objects.create(group=editor_group, permission=f"tag{restricted_tag.id}.viewForum")
+        editor.user_groups.add(editor_group)
+        discussion = create_runtime_discussion(
+            title="Restricted edit original",
+            content="Original content",
+            user=admin,
+            extension_payload=discussion_tags_payload([restricted_tag.id]),
+        )
+
+        denied_response = self.client.patch(
+            f"/api/discussions/{discussion.id}",
+            data=json.dumps({"title": "Denied edit"}),
+            content_type="application/json",
+            **self.auth_header(editor),
+        )
+
+        self.assertEqual(denied_response.status_code, 403, denied_response.content)
+        self.assertIn("没有权限编辑", denied_response.json()["error"])
+
+        Permission.objects.create(group=editor_group, permission=f"tag{restricted_tag.id}.discussion.edit")
+        if hasattr(editor, "_forum_permission_cache"):
+            delattr(editor, "_forum_permission_cache")
+
+        allowed_response = self.client.patch(
+            f"/api/discussions/{discussion.id}",
+            data=json.dumps({"title": "Allowed edit"}),
+            content_type="application/json",
+            **self.auth_header(editor),
+        )
+
+        self.assertEqual(allowed_response.status_code, 200, allowed_response.content)
+        self.assertEqual(allowed_response.json()["title"], "Allowed edit")
+
+    def test_restricted_tag_discussion_delete_requires_tag_specific_permission(self):
+        restricted_tag = Tag.objects.create(
+            name="受限删除标签",
+            slug="restricted-delete-tag",
+            is_restricted=True,
+            view_scope=Tag.ACCESS_PUBLIC,
+            start_discussion_scope=Tag.ACCESS_MEMBERS,
+            reply_scope=Tag.ACCESS_MEMBERS,
+        )
+        admin = User.objects.create_superuser(
+            username="restricted-delete-admin",
+            email="restricted-delete-admin@example.com",
+            password="password123",
+        )
+        moderator = User.objects.create_user(
+            username="restricted-delete-user",
+            email="restricted-delete-user@example.com",
+            password="password123",
+            is_email_confirmed=True,
+        )
+        moderator_group = Group.objects.create(name="RestrictedDiscussionDeleter", color="#4d698e")
+        Permission.objects.create(group=moderator_group, permission="discussion.delete")
+        Permission.objects.create(group=moderator_group, permission=f"tag{restricted_tag.id}.viewForum")
+        moderator.user_groups.add(moderator_group)
+        denied_discussion = create_runtime_discussion(
+            title="Restricted delete denied",
+            content="Original content",
+            user=admin,
+            extension_payload=discussion_tags_payload([restricted_tag.id]),
+        )
+        Discussion = type(denied_discussion)
+
+        denied_response = self.client.delete(
+            f"/api/discussions/{denied_discussion.id}",
+            **self.auth_header(moderator),
+        )
+
+        self.assertEqual(denied_response.status_code, 403, denied_response.content)
+        self.assertTrue(Discussion.objects.filter(id=denied_discussion.id).exists())
+
+        Permission.objects.create(group=moderator_group, permission=f"tag{restricted_tag.id}.discussion.delete")
+        if hasattr(moderator, "_forum_permission_cache"):
+            delattr(moderator, "_forum_permission_cache")
+        allowed_discussion = create_runtime_discussion(
+            title="Restricted delete allowed",
+            content="Original content",
+            user=admin,
+            extension_payload=discussion_tags_payload([restricted_tag.id]),
+        )
+
+        allowed_response = self.client.delete(
+            f"/api/discussions/{allowed_discussion.id}",
+            **self.auth_header(moderator),
+        )
+
+        self.assertEqual(allowed_response.status_code, 200, allowed_response.content)
+        self.assertFalse(Discussion.objects.filter(id=allowed_discussion.id).exists())
+
     def test_discussion_list_hides_staff_only_tag_for_non_staff(self):
         staff_tag = Tag.objects.create(
             name="Staff",

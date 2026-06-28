@@ -4,6 +4,11 @@ from bias_ext_tags.backend.services import TagService
 
 
 class DiscussionPolicy(AuthorizationPolicy):
+    def can(self, user, ability, model, **context):
+        if ability in {"view", "reply", "tag"}:
+            return None
+        return TagService.restricted_discussion_ability_decision(model, user, ability)
+
     def view(self, user, model, **context):
         return TagService.can_view_discussion_tags(model, user)
 

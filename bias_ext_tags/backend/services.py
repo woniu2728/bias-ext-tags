@@ -148,6 +148,24 @@ class TagService:
         return all(TagService.can_reply_in_tag(tag, user) for tag in get_discussion_tags(discussion))
 
     @staticmethod
+    def restricted_discussion_ability_decision(discussion, user: Optional[Any], ability: str):
+        normalized = str(ability or "").strip()
+        if not normalized:
+            return None
+        if discussion is None or isinstance(discussion, type) or getattr(discussion, "pk", None) is None:
+            return None
+
+        restricted_tags = [tag for tag in get_discussion_tags(discussion) if tag.is_restricted]
+        if not restricted_tags:
+            return None
+
+        permission = normalized if normalized.startswith("discussion.") else f"discussion.{normalized}"
+        for tag in restricted_tags:
+            if not TagService.has_restricted_tag_permission(tag, user, permission):
+                return False
+        return True
+
+    @staticmethod
     def can_tag_discussion(discussion, user: Optional[Any]) -> bool:
         if not user or not getattr(user, "is_authenticated", False):
             return False
