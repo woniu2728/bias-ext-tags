@@ -39,6 +39,16 @@ class TagService:
         "start_discussion": "startDiscussion",
         "reply": "discussion.reply",
     }
+    TAG_ABILITY_PERMISSION = {
+        "view": "viewForum",
+        "viewForum": "viewForum",
+        "start_discussion": "startDiscussion",
+        "startDiscussion": "startDiscussion",
+        "add_to_discussion": "startDiscussion",
+        "addToDiscussion": "startDiscussion",
+        "reply": "discussion.reply",
+        "discussion.reply": "discussion.reply",
+    }
     TAG_MANAGEMENT_PERMISSION_MESSAGES = {
         "tag.create": "没有权限创建标签",
         "tag.edit": "没有权限编辑标签",
@@ -142,6 +152,38 @@ class TagService:
     @staticmethod
     def can_add_to_discussion(tag: Tag, user: Optional[Any]) -> bool:
         return TagService.can_start_discussion_in_tag(tag, user)
+
+    @staticmethod
+    def can_tag_ability(tag: Optional[Tag], user: Optional[Any], ability: str):
+        if tag is None or isinstance(tag, type):
+            return None
+
+        normalized = str(ability or "").strip()
+        if not normalized:
+            return None
+
+        if normalized in {"view", "viewForum"}:
+            return TagService.can_view_tag(tag, user)
+        if normalized in {"start_discussion", "startDiscussion", "add_to_discussion", "addToDiscussion"}:
+            return TagService.can_start_discussion_in_tag(tag, user)
+        if normalized in {"reply", "discussion.reply"}:
+            return TagService.can_reply_in_tag(tag, user)
+
+        permission = TagService.TAG_ABILITY_PERMISSION.get(normalized, normalized)
+        return TagService.restricted_tag_ability_decision(tag, user, permission)
+
+    @staticmethod
+    def restricted_tag_ability_decision(tag: Tag, user: Optional[Any], permission: str):
+        if tag.parent_id:
+            parent = getattr(tag, "parent", None)
+            if parent is not None:
+                parent_decision = TagService.restricted_tag_ability_decision(parent, user, permission)
+                if parent_decision is False:
+                    return False
+
+        if tag.is_restricted:
+            return TagService.has_restricted_tag_permission(tag, user, permission)
+        return None
 
     @staticmethod
     def has_restricted_tag_permission(tag: Tag, user: Optional[Any], ability: str) -> bool:

@@ -43,6 +43,9 @@ class PostPolicy(AuthorizationPolicy):
 
 
 class TagPolicy(AuthorizationPolicy):
+    def can(self, user, ability, model, **context):
+        return TagService.can_tag_ability(model, user, ability)
+
     def create(self, user, model, **context):
         return TagService.can_manage_tags(user, "tag.create")
 
@@ -69,3 +72,6 @@ class TagPolicy(AuthorizationPolicy):
 
     def reply(self, user, model, **context):
         return TagService.can_reply_in_tag(model, user)
+
+    def add_to_discussion(self, user, model, **context):
+        return TagService.can_add_to_discussion(model, user)

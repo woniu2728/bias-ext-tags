@@ -218,6 +218,81 @@ class TagsExtensionRuntimeTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertTrue(can(member, "edit", tag))
         self.assertTrue(can(member, "move", tag))
 
+    def test_tag_policy_denies_child_ability_when_restricted_parent_is_denied(self):
+        from bias_core.authorization import can
+
+        self.bootstrap_extensions("tags")
+        member = User.objects.create_user(
+            username="tag-policy-child-member",
+            email="tag-policy-child-member@example.com",
+            password="password123",
+        )
+        group = Group.objects.create(name="TagPolicyChildAccess", color="#4d698e")
+        member.user_groups.add(group)
+        parent = Tag.objects.create(
+            name="受限父标签",
+            slug="policy-restricted-parent",
+            is_restricted=True,
+            view_scope=Tag.ACCESS_MEMBERS,
+            start_discussion_scope=Tag.ACCESS_MEMBERS,
+            reply_scope=Tag.ACCESS_MEMBERS,
+        )
+        child = Tag.objects.create(
+            name="受限子标签",
+            slug="policy-restricted-child",
+            parent=parent,
+            is_restricted=True,
+            view_scope=Tag.ACCESS_MEMBERS,
+            start_discussion_scope=Tag.ACCESS_MEMBERS,
+            reply_scope=Tag.ACCESS_MEMBERS,
+        )
+
+        Permission.objects.create(group=group, permission=f"tag{child.id}.viewForum")
+        if hasattr(member, "_forum_permission_cache"):
+            delattr(member, "_forum_permission_cache")
+
+        self.assertFalse(can(member, "view", child))
+
+        Permission.objects.create(group=group, permission=f"tag{parent.id}.viewForum")
+        if hasattr(member, "_forum_permission_cache"):
+            delattr(member, "_forum_permission_cache")
+
+        self.assertTrue(can(member, "view", child))
+
+    def test_tag_policy_add_to_discussion_alias_uses_start_permission(self):
+        from bias_core.authorization import can
+
+        self.bootstrap_extensions("tags")
+        member = User.objects.create_user(
+            username="tag-policy-add-member",
+            email="tag-policy-add-member@example.com",
+            password="password123",
+        )
+        group = Group.objects.create(name="TagPolicyAddAccess", color="#4d698e")
+        member.user_groups.add(group)
+        tag = Tag.objects.create(
+            name="发帖标签",
+            slug="policy-add-tag",
+            is_restricted=True,
+            view_scope=Tag.ACCESS_MEMBERS,
+            start_discussion_scope=Tag.ACCESS_MEMBERS,
+            reply_scope=Tag.ACCESS_MEMBERS,
+        )
+
+        Permission.objects.create(group=group, permission=f"tag{tag.id}.viewForum")
+        if hasattr(member, "_forum_permission_cache"):
+            delattr(member, "_forum_permission_cache")
+
+        self.assertFalse(can(member, "addToDiscussion", tag))
+        self.assertFalse(can(member, "add_to_discussion", tag))
+
+        Permission.objects.create(group=group, permission=f"tag{tag.id}.startDiscussion")
+        if hasattr(member, "_forum_permission_cache"):
+            delattr(member, "_forum_permission_cache")
+
+        self.assertTrue(can(member, "addToDiscussion", tag))
+        self.assertTrue(can(member, "add_to_discussion", tag))
+
     def test_tag_service_management_checks_use_forum_permissions(self):
         self.bootstrap_extensions("tags")
         member = User.objects.create_user(
@@ -1390,6 +1465,37 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
             per_child_parent_queries,
             [],
             "Tag index default parent include should use select_related instead of querying once per child tag.",
+        )
+
+    def test_tag_policy_parent_ability_uses_prefetched_parent(self):
+        children = [
+            Tag.objects.create(
+                name=f"策略父级批量子标签 {index}",
+                slug=f"policy-parent-batch-child-{index}",
+                parent=self.public_tag,
+                position=index,
+            )
+            for index in range(5)
+        ]
+        loaded_children = list(Tag.objects.select_related("parent").filter(id__in=[tag.id for tag in children]))
+
+        with CaptureQueriesContext(connection) as queries:
+            decisions = [
+                TagService.can_tag_ability(tag, self.member, "view")
+                for tag in loaded_children
+            ]
+
+        self.assertTrue(all(decisions))
+        per_child_parent_queries = [
+            query["sql"]
+            for query in queries
+            if 'from "tags"' in query["sql"].lower()
+            and f'"tags"."id" = {self.public_tag.id}' in query["sql"]
+        ]
+        self.assertEqual(
+            per_child_parent_queries,
+            [],
+            "Tag policy parent inheritance should use the prefetched parent instead of querying once per child tag.",
         )
 
     def test_tag_list_children_include_uses_prefetched_children(self):
