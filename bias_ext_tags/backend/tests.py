@@ -915,10 +915,9 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
             f"/api/tags/{tag.id}",
             **self.auth_header(self.member),
         )
-        self.assertEqual(denied_response.status_code, 200, denied_response.content)
-        self.assertFalse(denied_response.json()["can_start_discussion"])
-        self.assertFalse(denied_response.json()["can_add_to_discussion"])
+        self.assertEqual(denied_response.status_code, 403, denied_response.content)
 
+        Permission.objects.create(group=limited_group, permission=f"tag{tag.id}.viewForum")
         Permission.objects.create(group=limited_group, permission=f"tag{tag.id}.startDiscussion")
         if hasattr(self.member, "_forum_permission_cache"):
             delattr(self.member, "_forum_permission_cache")
@@ -930,6 +929,42 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(allowed_response.status_code, 200, allowed_response.content)
         self.assertTrue(allowed_response.json()["can_start_discussion"])
         self.assertTrue(allowed_response.json()["can_add_to_discussion"])
+
+    def test_restricted_tag_detail_and_slug_require_view_permission(self):
+        tag = Tag.objects.create(
+            name="受限查看标签",
+            slug="restricted-view-tag",
+            is_restricted=True,
+            view_scope=Tag.ACCESS_PUBLIC,
+            start_discussion_scope=Tag.ACCESS_MEMBERS,
+            reply_scope=Tag.ACCESS_MEMBERS,
+        )
+        group = Group.objects.create(name="RestrictedView", color="#4d698e")
+        self.member.user_groups.add(group)
+
+        detail_response = self.client.get(
+            f"/api/tags/{tag.id}",
+            **self.auth_header(self.member),
+        )
+        slug_response = self.client.get(
+            f"/api/tags/slug/{tag.slug}",
+            **self.auth_header(self.member),
+        )
+
+        self.assertEqual(detail_response.status_code, 403, detail_response.content)
+        self.assertEqual(slug_response.status_code, 403, slug_response.content)
+
+        Permission.objects.create(group=group, permission=f"tag{tag.id}.viewForum")
+        if hasattr(self.member, "_forum_permission_cache"):
+            delattr(self.member, "_forum_permission_cache")
+
+        allowed_response = self.client.get(
+            f"/api/tags/{tag.id}",
+            **self.auth_header(self.member),
+        )
+
+        self.assertEqual(allowed_response.status_code, 200, allowed_response.content)
+        self.assertEqual(allowed_response.json()["slug"], tag.slug)
 
     def test_start_discussion_tag_list_hides_restricted_tags_without_tag_permission(self):
         restricted_tag = Tag.objects.create(
@@ -1719,6 +1754,49 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(allowed_response.status_code, 200, allowed_response.content)
         self.assertEqual([item["id"] for item in allowed_response.json()["data"]], [discussion.id])
 
+    def test_discussion_detail_hides_restricted_tag_without_view_permission(self):
+        restricted_tag = Tag.objects.create(
+            name="受限详情标签",
+            slug="restricted-detail-view",
+            is_restricted=True,
+            view_scope=Tag.ACCESS_PUBLIC,
+            start_discussion_scope=Tag.ACCESS_MEMBERS,
+            reply_scope=Tag.ACCESS_MEMBERS,
+        )
+        member_group = Group.objects.create(name="RestrictedDetailReader", color="#4d698e")
+        Permission.objects.create(group=member_group, permission="viewForum")
+        self.reader.user_groups.add(member_group)
+        admin = User.objects.create_superuser(
+            username="restricted-detail-admin",
+            email="restricted-detail-admin@example.com",
+            password="password123",
+        )
+        discussion = create_runtime_discussion(
+            title="受限详情讨论",
+            content="详情页也必须尊重 tag viewForum 权限。",
+            user=admin,
+            extension_payload=discussion_tags_payload([restricted_tag.id]),
+        )
+
+        denied_response = self.client.get(
+            f"/api/discussions/{discussion.id}",
+            **self.auth_header(self.reader),
+        )
+
+        self.assertEqual(denied_response.status_code, 404, denied_response.content)
+
+        Permission.objects.create(group=member_group, permission=f"tag{restricted_tag.id}.viewForum")
+        if hasattr(self.reader, "_forum_permission_cache"):
+            delattr(self.reader, "_forum_permission_cache")
+
+        allowed_response = self.client.get(
+            f"/api/discussions/{discussion.id}",
+            **self.auth_header(self.reader),
+        )
+
+        self.assertEqual(allowed_response.status_code, 200, allowed_response.content)
+        self.assertEqual(allowed_response.json()["id"], discussion.id)
+
     def test_discussion_list_active_slug_driver_respects_tag_visibility(self):
         set_active_slug_driver(Tag, "id_with_slug")
         staff_tag = Tag.objects.create(
@@ -2070,6 +2148,7 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
             Permission.objects.create(group=group, permission="startDiscussion")
             Permission.objects.create(group=group, permission="startDiscussionWithoutApproval")
             for tag in tags:
+                Permission.objects.get_or_create(group=group, permission=f"tag{tag.id}.viewForum")
                 Permission.objects.create(group=group, permission=f"tag{tag.id}.startDiscussion")
 
         reader_group = groups[0]
@@ -2470,6 +2549,7 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(denied_response.status_code, 403, denied_response.content)
         self.assertIn("没有权限将标签", denied_response.json()["error"])
 
+        Permission.objects.create(group=member_group, permission=f"tag{restricted_tag.id}.viewForum")
         Permission.objects.create(group=member_group, permission=f"tag{restricted_tag.id}.startDiscussion")
         if hasattr(self.author, "_forum_permission_cache"):
             delattr(self.author, "_forum_permission_cache")

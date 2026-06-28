@@ -94,6 +94,11 @@ class TagService:
 
     @staticmethod
     def can_view_tag(tag: Tag, user: Optional[Any]) -> bool:
+        if tag.parent_id and tag.parent:
+            if not TagService.can_view_tag(tag.parent, user):
+                return False
+        if tag.is_restricted and not TagService.has_restricted_tag_permission(tag, user, "viewForum"):
+            return False
         return TagService.has_scope_access(user, tag.view_scope)
 
     @staticmethod
