@@ -59,6 +59,8 @@ from bias_core.extensions.runtime import (
     get_runtime_permission_model,
     get_runtime_user_model,
 )
+from bias_core.models import Setting
+from bias_core.settings_service import clear_runtime_setting_caches
 
 
 class RuntimeModelProxy:
@@ -75,6 +77,14 @@ Permission = RuntimeModelProxy(get_runtime_permission_model)
 Post = RuntimeModelProxy(get_runtime_post_model)
 DiscussionTag = RuntimeModelProxy(get_runtime_discussion_tag_model)
 TagState = RuntimeModelProxy(get_runtime_tag_state_model)
+
+
+def set_active_slug_driver(model, identifier: str):
+    Setting.objects.update_or_create(
+        key=f"slug_driver_{model.__module__}.{model.__qualname__}",
+        defaults={"value": json.dumps(identifier)},
+    )
+    clear_runtime_setting_caches()
 
 
 def discussion_tags_payload(tag_ids):
@@ -1388,6 +1398,35 @@ class TagSearchApiTests(ExtensionRuntimeTestMixin, TestCase):
             {first_discussion.id, second_discussion.id},
         )
 
+    def test_search_api_tag_filter_uses_active_slug_driver(self):
+        set_active_slug_driver(Tag, "id_with_slug")
+        first_tag = Tag.objects.create(name="搜索 ID 标签一", slug="search-id-filter-one")
+        second_tag = Tag.objects.create(name="搜索 ID 标签二", slug="search-id-filter-two")
+        first_discussion = create_runtime_discussion(
+            title="ID 标签搜索命中一",
+            content="active-slug-keyword",
+            user=self.user,
+            extension_payload=discussion_tags_payload([first_tag.id]),
+        )
+        second_discussion = create_runtime_discussion(
+            title="ID 标签搜索命中二",
+            content="active-slug-keyword",
+            user=self.user,
+            extension_payload=discussion_tags_payload([second_tag.id]),
+        )
+
+        response = self.client.get(
+            "/api/search",
+            {"q": f"active-slug-keyword tag:{first_tag.id}-renamed,{second_tag.id}", "type": "discussions"},
+            **self.auth_header(),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(
+            {item["id"] for item in response.json()["discussions"]},
+            {first_discussion.id, second_discussion.id},
+        )
+
     def test_search_filters_api_exposes_registered_tag_filter_syntax(self):
         response = self.client.get("/api/search/filters", {"target": "discussions"})
 
@@ -1573,6 +1612,74 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
             len(slug_resolution_queries),
             1,
             f"Expected one batched slug lookup, got {len(slug_resolution_queries)}: {slug_resolution_queries}",
+        )
+
+    def test_discussion_list_tag_filter_uses_active_slug_driver(self):
+        set_active_slug_driver(Tag, "id_with_slug")
+        first_tag = Tag.objects.create(name="列表 ID 标签一", slug="list-id-filter-one")
+        second_tag = Tag.objects.create(name="列表 ID 标签二", slug="list-id-filter-two")
+        first_discussion = create_runtime_discussion(
+            title="ID 标签列表命中一",
+            content="按当前 slug driver 筛选。",
+            user=self.author,
+            extension_payload=discussion_tags_payload([first_tag.id]),
+        )
+        second_discussion = create_runtime_discussion(
+            title="ID 标签列表命中二",
+            content="按当前 slug driver 筛选。",
+            user=self.author,
+            extension_payload=discussion_tags_payload([second_tag.id]),
+        )
+
+        response = self.client.get(
+            "/api/discussions/",
+            {"tag": f"{first_tag.id}-renamed,{second_tag.id}"},
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(
+            {item["id"] for item in response.json()["data"]},
+            {first_discussion.id, second_discussion.id},
+        )
+
+    def test_discussion_list_active_slug_driver_resolves_multiple_slugs_with_one_lookup(self):
+        from bias_ext_tags.backend.search import apply_discussion_tag_list_query
+
+        set_active_slug_driver(Tag, "id_with_slug")
+        tags = [
+            Tag.objects.create(name=f"ID 查询标签 {index}", slug=f"id-query-filter-{index}")
+            for index in range(3)
+        ]
+        discussions = []
+        for tag in tags:
+            discussions.append(create_runtime_discussion(
+                title=f"ID 查询标签讨论 {tag.id}",
+                content="用于 active driver 查询数量防线。",
+                user=self.author,
+                extension_payload=discussion_tags_payload([tag.id]),
+            ))
+
+        with CaptureQueriesContext(connection) as queries:
+            queryset = apply_discussion_tag_list_query(
+                discussions[0].__class__.objects.all(),
+                {
+                    "user": self.author,
+                    "params": {"tag": ",".join(f"{tag.id}-renamed" for tag in tags)},
+                },
+            )
+            result_ids = set(queryset.values_list("id", flat=True))
+
+        self.assertEqual(result_ids, {discussion.id for discussion in discussions})
+        id_resolution_queries = [
+            query["sql"]
+            for query in queries
+            if 'from "tags"' in query["sql"].lower()
+            and '"id" in' in query["sql"].lower()
+        ]
+        self.assertEqual(
+            len(id_resolution_queries),
+            1,
+            f"Expected one batched id slug lookup, got {len(id_resolution_queries)}: {id_resolution_queries}",
         )
 
     def test_discussion_list_tag_filter_unknown_slug_returns_empty_result(self):

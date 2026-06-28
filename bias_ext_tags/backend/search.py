@@ -121,6 +121,7 @@ def _resolve_tag_slug_ids(groups: tuple[tuple[str, ...], ...], context: dict) ->
     resolved = resolve_runtime_model_slugs(
         Tag,
         slugs,
+        identifier=None,
         context={"user": (context or {}).get("user")},
     )
     return {
