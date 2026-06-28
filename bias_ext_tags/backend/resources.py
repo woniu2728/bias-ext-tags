@@ -256,6 +256,8 @@ def tag_resource_endpoints():
 
 
 def serialize_tag_base(tag, context: dict) -> dict:
+    from bias_ext_tags.backend.services import TagService
+
     payload = {
         "id": tag.id,
         "name": tag.name,
@@ -267,8 +269,8 @@ def serialize_tag_base(tag, context: dict) -> dict:
         "position": tag.position,
         "parent_id": tag.parent_id,
         "is_hidden": tag.is_hidden,
-        "is_primary": tag.parent_id is None,
-        "is_child": tag.parent_id is not None,
+        "is_primary": TagService.is_primary_tag(tag),
+        "is_child": TagService.is_child_tag(tag),
         "discussion_count": tag.discussion_count,
         "last_posted_at": tag.last_posted_at,
         "created_at": tag.created_at,

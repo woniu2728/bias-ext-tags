@@ -71,6 +71,22 @@ class TagService:
     }
 
     @staticmethod
+    def primary_tag_filter(prefix: str = ""):
+        return Q(**{f"{prefix}position__isnull": False, f"{prefix}parent_id__isnull": True})
+
+    @staticmethod
+    def secondary_tag_filter(prefix: str = ""):
+        return ~TagService.primary_tag_filter(prefix)
+
+    @staticmethod
+    def is_primary_tag(tag: Optional[Tag]) -> bool:
+        return bool(tag and tag.parent_id is None and tag.position is not None)
+
+    @staticmethod
+    def is_child_tag(tag: Optional[Tag]) -> bool:
+        return bool(tag and tag.parent_id is not None)
+
+    @staticmethod
     def _settings_int(settings: dict, key: str, default: int = 0) -> int:
         try:
             return max(0, int(settings.get(key, default)))
@@ -366,10 +382,10 @@ class TagService:
 
         allowed = TagService.filter_tags_for_user(Tag.objects.all(), user, action=action)
         counts = {
-            "allowed_primary": allowed.filter(position__isnull=False, parent_id__isnull=True).count(),
-            "allowed_secondary": allowed.filter(parent_id__isnull=False).count(),
-            "total_primary": Tag.objects.filter(position__isnull=False, parent_id__isnull=True).count(),
-            "total_secondary": Tag.objects.filter(parent_id__isnull=False).count(),
+            "allowed_primary": allowed.filter(TagService.primary_tag_filter()).count(),
+            "allowed_secondary": allowed.filter(TagService.secondary_tag_filter()).count(),
+            "total_primary": Tag.objects.filter(TagService.primary_tag_filter()).count(),
+            "total_secondary": Tag.objects.filter(TagService.secondary_tag_filter()).count(),
         }
         cache[cache_key] = counts
         return dict(counts)

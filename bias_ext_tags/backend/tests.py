@@ -1405,6 +1405,26 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertFalse(child_payload["is_primary"])
         self.assertTrue(child_payload["is_child"])
 
+    def test_tag_structure_flags_use_central_primary_and_child_helpers(self):
+        child = Tag.objects.create(
+            name="Helper 子标签",
+            slug="helper-child",
+            parent=self.public_tag,
+        )
+
+        self.assertTrue(TagService.is_primary_tag(self.public_tag))
+        self.assertFalse(TagService.is_child_tag(self.public_tag))
+        self.assertFalse(TagService.is_primary_tag(child))
+        self.assertTrue(TagService.is_child_tag(child))
+        self.assertEqual(
+            set(Tag.objects.filter(TagService.primary_tag_filter()).values_list("id", flat=True)),
+            {self.public_tag.id, self.members_tag.id, self.staff_tag.id},
+        )
+        self.assertIn(
+            child.id,
+            set(Tag.objects.filter(TagService.secondary_tag_filter()).values_list("id", flat=True)),
+        )
+
     def test_tag_detail_exposes_registered_resource_fields(self):
         with self.captureOnCommitCallbacks(execute=True):
             discussion = create_runtime_discussion(
