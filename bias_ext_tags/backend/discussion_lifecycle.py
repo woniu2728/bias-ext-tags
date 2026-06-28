@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from bias_core.extensions.platform import dispatch_forum_event_after_commit
-from bias_ext_tags.backend.events import TagStatsRefreshRequestedEvent
 from bias_ext_tags.backend.tag_relationships import get_discussion_tag_ids
 from bias_ext_tags.backend.services import TagService
 
@@ -35,15 +33,27 @@ def apply_discussion_update(*, discussion, state: dict | None = None, context: d
     if not affected_tag_ids:
         return {}
 
-    if (context or {}).get("was_counted") and (context or {}).get("is_counted"):
+    was_counted = bool((context or {}).get("was_counted"))
+    is_counted = bool((context or {}).get("is_counted"))
+
+    if was_counted and is_counted:
         TagService.adjust_tag_stats_for_discussion_tag_change(
             discussion,
             added_tag_ids=relationship_result.get("added_tag_ids") or (),
             removed_tag_ids=relationship_result.get("removed_tag_ids") or (),
         )
-    else:
-        dispatch_forum_event_after_commit(
-            TagStatsRefreshRequestedEvent(tag_ids=affected_tag_ids)
+    elif is_counted:
+        TagService.increment_tag_stats_for_discussion(
+            discussion,
+            relationship_result.get("current_tag_ids") or (),
+        )
+    elif was_counted:
+        TagService.adjust_tag_stats_for_deleted_discussion(
+            relationship_result.get("previous_tag_ids") or (),
+            latest_tag_ids=TagService.tag_ids_where_discussion_is_latest(
+                discussion,
+                relationship_result.get("previous_tag_ids") or (),
+            ),
         )
 
     return {

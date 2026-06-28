@@ -1868,6 +1868,52 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(tag_b.discussion_count, 1)
         self.assertEqual(tag_b.last_posted_discussion_id, latest_discussion.id)
 
+    def test_update_pending_discussion_tags_does_not_refresh_or_adjust_tag_stats(self):
+        trusted_group = Group.objects.create(name="PendingRetagTrusted", color="#4d698e")
+        Permission.objects.create(group=trusted_group, permission="startDiscussion")
+        Permission.objects.create(group=trusted_group, permission="discussion.edit")
+        self.author.user_groups.add(trusted_group)
+
+        tag_a = Tag.objects.create(name="待审核旧标签", slug="pending-old-tag", color="#3498db")
+        tag_b = Tag.objects.create(name="待审核新标签", slug="pending-new-tag", color="#2ecc71")
+        discussion = create_runtime_discussion(
+            title="Pending retag",
+            content="Pending content",
+            user=self.author,
+            extension_payload=discussion_tags_payload([tag_a.id]),
+        )
+        discussion.approval_status = discussion.APPROVAL_PENDING
+        discussion.approved_at = None
+        discussion.approved_by = None
+        discussion.save(update_fields=["approval_status", "approved_at", "approved_by"])
+        Post.objects.filter(id=discussion.first_post_id).update(
+            approval_status=Post.APPROVAL_PENDING,
+            approved_at=None,
+            approved_by=None,
+        )
+        TagService.refresh_tag_stats([tag_a.id, tag_b.id])
+        tag_a.refresh_from_db()
+        tag_b.refresh_from_db()
+        self.assertEqual(tag_a.discussion_count, 0)
+        self.assertEqual(tag_b.discussion_count, 0)
+
+        events, dispatch_patch = capture_runtime_events()
+        with patch("bias_ext_tags.backend.services.TagService.refresh_tag_stats") as refresh_tag_stats:
+            with dispatch_patch:
+                with self.captureOnCommitCallbacks(execute=True):
+                    update_runtime_discussion(
+                        discussion_id=discussion.id,
+                        user=self.author,
+                        extension_payload=discussion_tags_payload([tag_b.id]),
+                    )
+
+        tag_a.refresh_from_db()
+        tag_b.refresh_from_db()
+        self.assertEqual(tag_a.discussion_count, 0)
+        self.assertEqual(tag_b.discussion_count, 0)
+        refresh_tag_stats.assert_not_called()
+        self.assertFalse(any(isinstance(event, TagStatsRefreshRequestedEvent) for event in events))
+
     def test_update_discussion_dispatches_discussion_tagged_event_with_all_affected_tag_ids(self):
         parent_tag = Tag.objects.create(name="父标签", slug="parent-tag", color="#3498db")
         old_child_tag = Tag.objects.create(
