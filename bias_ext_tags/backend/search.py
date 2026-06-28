@@ -33,7 +33,8 @@ def hide_hidden_tag_discussions_from_all_list(queryset, context: dict):
     context = context or {}
     params = context.get("params")
     if (
-        _has_value(context.get("query"))
+        _has_active_filters(context.get("active_filters"))
+        or _has_value(context.get("query"))
         or _has_value(context.get("author"))
         or _query_param_value(params, "tag")
         or str(context.get("filter") or "all").strip().lower() != "all"
@@ -142,3 +143,11 @@ def _query_param_value(params, key: str) -> str:
 
 def _has_value(value) -> bool:
     return bool(str(value or "").strip())
+
+
+def _has_active_filters(value) -> bool:
+    if isinstance(value, dict):
+        return any(_has_value(item) for item in value.values())
+    if isinstance(value, (list, tuple, set)):
+        return any(_has_value(item) for item in value)
+    return _has_value(value)

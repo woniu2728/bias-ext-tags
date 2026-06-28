@@ -21,7 +21,7 @@ from bias_core.extensions.runtime import (
     to_runtime_model_slug,
     update_runtime_discussion,
 )
-from bias_core.extensions import ResourceEndpointDefinition
+from bias_core.extensions import ResourceEndpointDefinition, SearchFilterDefinition
 from bias_core.extensions.testing import (
     AuditLog,
     ExtensionInstallation,
@@ -1870,6 +1870,37 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
 
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual([item["id"] for item in response.json()["data"]], [discussion.id])
+
+    def test_hidden_tag_discussions_are_not_hidden_when_search_filter_is_active(self):
+        from bias_ext_discussions.backend.services import DiscussionService
+
+        hidden_tag = Tag.objects.create(name="隐藏", slug="hidden-token-list", is_hidden=True)
+        discussion = create_runtime_discussion(
+            title="隐藏标签 token 过滤讨论",
+            content="search filter token should disable default hidden tag exclusion.",
+            user=self.author,
+            extension_payload=discussion_tags_payload([hidden_tag.id]),
+        )
+
+        def parse_filter(token):
+            return "yes" if token == "token:yes" else None
+
+        def apply_filter(queryset, value, context):
+            return queryset if value == "yes" else queryset.none()
+
+        get_forum_registry().register_search_filter(SearchFilterDefinition(
+            code="token",
+            label="Token",
+            module_id="tags",
+            target="discussion",
+            parser=parse_filter,
+            applier=apply_filter,
+        ))
+
+        discussions, total = DiscussionService.get_discussion_list(q="token:yes", user=self.author)
+
+        self.assertEqual(total, 1)
+        self.assertEqual([item.id for item in discussions], [discussion.id])
 
     def test_discussion_detail_field_selection_keeps_tags_relationship(self):
         tag = Tag.objects.create(name="字段裁剪标签", slug="field-selection-tag", color="#4d698e")
