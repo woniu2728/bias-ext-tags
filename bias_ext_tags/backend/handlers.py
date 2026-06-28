@@ -286,26 +286,29 @@ def dispatch_tag_show_by_slug(context):
 
 
 def dispatch_tag_update(context):
-    payload = TagUpdateSchema(**_tag_payload(context))
+    raw_payload = _tag_payload(context)
+    payload = TagUpdateSchema(**raw_payload)
+    update_kwargs = {
+        "tag_id": _tag_object_id(context),
+        "user": context["user"],
+        "name": payload.name,
+        "slug": payload.slug,
+        "description": payload.description,
+        "color": payload.color,
+        "icon": payload.icon,
+        "background_url": payload.background_url,
+        "position": payload.position,
+        "is_primary": payload.is_primary,
+        "is_hidden": payload.is_hidden,
+        "is_restricted": payload.is_restricted,
+        "view_scope": payload.view_scope,
+        "start_discussion_scope": payload.start_discussion_scope,
+        "reply_scope": payload.reply_scope,
+    }
+    if "parent_id" in raw_payload:
+        update_kwargs["parent_id"] = payload.parent_id
     try:
-        tag = TagService.update_tag(
-            tag_id=_tag_object_id(context),
-            user=context["user"],
-            name=payload.name,
-            slug=payload.slug,
-            description=payload.description,
-            color=payload.color,
-            icon=payload.icon,
-            background_url=payload.background_url,
-            position=payload.position,
-            is_primary=payload.is_primary,
-            parent_id=payload.parent_id,
-            is_hidden=payload.is_hidden,
-            is_restricted=payload.is_restricted,
-            view_scope=payload.view_scope,
-            start_discussion_scope=payload.start_discussion_scope,
-            reply_scope=payload.reply_scope,
-        )
+        tag = TagService.update_tag(**update_kwargs)
 
         tag = Tag.objects.select_related("last_posted_discussion").prefetch_related("children").get(id=tag.id)
         return _serialize_tag(tag, user=context["user"], include_children=True)

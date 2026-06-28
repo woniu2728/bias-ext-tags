@@ -1490,6 +1490,28 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertTrue(payload["can_reply"])
         self.assertEqual(payload["last_posted_discussion"]["id"], discussion.id)
 
+    def test_tag_update_without_parent_field_preserves_existing_parent(self):
+        child = Tag.objects.create(
+            name="保留父级",
+            slug="keep-parent-child",
+            parent=self.public_tag,
+            position=0,
+        )
+
+        response = self.client.patch(
+            f"/api/tags/{child.id}",
+            data=json.dumps({"name": "保留父级更新"}),
+            content_type="application/json",
+            **self.auth_header(self.admin),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        child.refresh_from_db()
+        self.assertEqual(child.name, "保留父级更新")
+        self.assertEqual(child.parent_id, self.public_tag.id)
+        self.assertTrue(child.is_primary)
+        self.assertTrue(response.json()["is_child"])
+
     def test_tag_detail_exposes_actor_tag_state_for_authenticated_user(self):
         marked_state = TagService.mark_tag_read(self.members_tag, self.member)
 
