@@ -917,6 +917,28 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertNotIn("start_discussion_scope", child_payload)
         self.assertNotIn("reply_scope", child_payload)
 
+    def test_tag_payload_exposes_primary_and_child_flags(self):
+        child = Tag.objects.create(
+            name="子结构",
+            slug="structure-child",
+            parent=self.public_tag,
+            view_scope=Tag.ACCESS_PUBLIC,
+            start_discussion_scope=Tag.ACCESS_MEMBERS,
+            reply_scope=Tag.ACCESS_MEMBERS,
+        )
+
+        parent_response = self.client.get(f"/api/tags/{self.public_tag.id}")
+        child_response = self.client.get(f"/api/tags/{child.id}")
+
+        self.assertEqual(parent_response.status_code, 200, parent_response.content)
+        self.assertEqual(child_response.status_code, 200, child_response.content)
+        parent_payload = parent_response.json()
+        child_payload = child_response.json()
+        self.assertTrue(parent_payload["is_primary"])
+        self.assertFalse(parent_payload["is_child"])
+        self.assertFalse(child_payload["is_primary"])
+        self.assertTrue(child_payload["is_child"])
+
     def test_tag_detail_exposes_registered_resource_fields(self):
         with self.captureOnCommitCallbacks(execute=True):
             discussion = create_runtime_discussion(

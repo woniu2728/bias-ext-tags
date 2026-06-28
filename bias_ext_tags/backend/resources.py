@@ -244,6 +244,8 @@ def serialize_tag_base(tag, context: dict) -> dict:
         "position": tag.position,
         "parent_id": tag.parent_id,
         "is_hidden": tag.is_hidden,
+        "is_primary": tag.parent_id is None,
+        "is_child": tag.parent_id is not None,
         "discussion_count": tag.discussion_count,
         "last_posted_at": tag.last_posted_at,
         "created_at": tag.created_at,
