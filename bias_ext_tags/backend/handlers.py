@@ -41,10 +41,12 @@ def _serialize_tag(
     payload = _get_resource_registry().serialize(
         "tag",
         tag,
-        {"user": user, "action": action},
+        {"user": user, "action": action, **context},
         only=resource_options.fields,
         include=resource_options.includes,
     )
+    if "children" in resource_options.includes:
+        return payload
     children = []
     if include_children:
         children = [

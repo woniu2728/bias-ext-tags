@@ -152,6 +152,25 @@ def tag_resource_relationship_definitions():
     return (
         ResourceRelationshipDefinition(
             resource="tag",
+            relationship="parent",
+            module_id=EXTENSION_ID,
+            resolver=resolve_tag_parent,
+            description="标签父级关系。",
+            select_related=("parent",),
+            resource_type="tag",
+        ),
+        ResourceRelationshipDefinition(
+            resource="tag",
+            relationship="children",
+            module_id=EXTENSION_ID,
+            resolver=resolve_tag_children,
+            description="标签子级关系。",
+            prefetch_related=("children",),
+            resource_type="tag",
+            many=True,
+        ),
+        ResourceRelationshipDefinition(
+            resource="tag",
             relationship="last_posted_discussion",
             module_id=EXTENSION_ID,
             resolver=resolve_tag_last_posted_discussion,
@@ -387,6 +406,33 @@ def resolve_tag_last_posted_discussion(tag, context: dict) -> dict | None:
         "last_post_number": discussion.last_post_number,
         "last_posted_at": discussion.last_posted_at,
     }
+
+
+def resolve_tag_parent(tag, context: dict):
+    parent = getattr(tag, "parent", None)
+    if parent is None:
+        return None
+    from bias_ext_tags.backend.services import TagService
+
+    if not TagService.can_view_tag(parent, context.get("user")):
+        return None
+    return parent
+
+
+def resolve_tag_children(tag, context: dict) -> list[Tag]:
+    children = getattr(tag, "visible_children", None)
+    if children is None:
+        children = getattr(tag, "children", []).all().order_by("position", "name")
+    forbidden_tag_ids = context.get("forbidden_tag_ids")
+    if forbidden_tag_ids is None:
+        from bias_ext_tags.backend.services import TagService
+
+        forbidden_tag_ids = set(TagService.get_forbidden_tag_ids(context.get("user"), action=context.get("action", "view")))
+    return [
+        child
+        for child in children
+        if not child.is_hidden and child.id not in forbidden_tag_ids
+    ]
 
 
 def _normalized_lines(content: str | None) -> list[str]:

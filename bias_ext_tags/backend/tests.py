@@ -1157,6 +1157,65 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertIn("last_posted_discussion", payload)
         self.assertEqual(payload["last_posted_discussion"]["id"], discussion.id)
 
+    def test_tag_detail_supports_parent_and_children_resource_includes(self):
+        visible_child = Tag.objects.create(
+            name="关系子标签",
+            slug="relationship-child",
+            parent=self.public_tag,
+            position=1,
+        )
+        Tag.objects.create(
+            name="隐藏关系子标签",
+            slug="relationship-hidden-child",
+            parent=self.public_tag,
+            is_hidden=True,
+            position=2,
+        )
+
+        parent_response = self.client.get(
+            f"/api/tags/{self.public_tag.id}",
+            {"include": "children"},
+        )
+        child_response = self.client.get(
+            f"/api/tags/{visible_child.id}",
+            {"include": "parent"},
+        )
+
+        self.assertEqual(parent_response.status_code, 200, parent_response.content)
+        self.assertEqual(child_response.status_code, 200, child_response.content)
+        parent_payload = parent_response.json()
+        child_payload = child_response.json()
+        self.assertEqual([item["slug"] for item in parent_payload["children"]], ["relationship-child"])
+        self.assertEqual(child_payload["parent"]["id"], self.public_tag.id)
+        self.assertEqual(child_payload["parent"]["slug"], self.public_tag.slug)
+
+    def test_tag_list_children_include_uses_prefetched_children(self):
+        for index in range(5):
+            Tag.objects.create(
+                name=f"批量关系子标签 {index}",
+                slug=f"relationship-batch-child-{index}",
+                parent=self.public_tag,
+                position=index,
+            )
+
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get("/api/tags", {"include": "children"})
+
+        self.assertEqual(response.status_code, 200, response.content)
+        public_tag = next(tag for tag in response.json()["data"] if tag["slug"] == self.public_tag.slug)
+        self.assertEqual(len(public_tag["children"]), 5)
+        per_parent_child_queries = [
+            query["sql"]
+            for query in queries
+            if 'from "tags"' in query["sql"].lower()
+            and '"tags"."parent_id" =' in query["sql"].lower()
+        ]
+        self.assertEqual(
+            per_parent_child_queries,
+            [],
+            "Tag children include should use the prefetched child collection instead of querying per parent tag.",
+        )
+
     def test_tag_slug_detail_accepts_id_with_slug_url(self):
         response = self.client.get(f"/api/tags/slug/{self.public_tag.id}-renamed")
 
