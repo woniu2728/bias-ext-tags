@@ -114,10 +114,6 @@ def handle_discussion_approved_tag_stats(event) -> None:
 
 
 def handle_discussion_tagged(event: DiscussionTaggedEvent) -> None:
-    if event.tag_ids:
-        refresh_runtime_tag_stats(list(event.tag_ids))
-    else:
-        refresh_runtime_discussion_tag_stats(event.discussion_id)
     create_runtime_timeline_from_builder(
         event,
         "discussion_tagged",

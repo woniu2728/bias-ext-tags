@@ -1821,13 +1821,15 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
 
         events, dispatch_patch = capture_runtime_events()
         with patch("bias_ext_tags.backend.services.TagService.refresh_tag_stats") as refresh_tag_stats:
-            with dispatch_patch:
-                with self.captureOnCommitCallbacks(execute=True):
-                    update_runtime_discussion(
-                        discussion_id=discussion.id,
-                        user=self.author,
-                        extension_payload=discussion_tags_payload([tag_b.id]),
-                    )
+            with patch("bias_ext_tags.backend.listeners.refresh_runtime_tag_stats") as refresh_runtime_tag_stats:
+                with patch("bias_ext_tags.backend.listeners.refresh_runtime_discussion_tag_stats") as refresh_discussion_tag_stats:
+                    with dispatch_patch:
+                        with self.captureOnCommitCallbacks(execute=True):
+                            update_runtime_discussion(
+                                discussion_id=discussion.id,
+                                user=self.author,
+                                extension_payload=discussion_tags_payload([tag_b.id]),
+                            )
 
         tag_a.refresh_from_db()
         tag_b.refresh_from_db()
@@ -1836,6 +1838,8 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(tag_b.discussion_count, 1)
         self.assertEqual(tag_b.last_posted_discussion_id, discussion.id)
         refresh_tag_stats.assert_not_called()
+        refresh_runtime_tag_stats.assert_not_called()
+        refresh_discussion_tag_stats.assert_not_called()
         self.assertFalse(any(isinstance(event, TagStatsRefreshRequestedEvent) for event in events))
 
     def test_update_discussion_tags_refreshes_removed_latest_tag(self):
