@@ -866,6 +866,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertNotIn("view_scope", payload)
         self.assertNotIn("start_discussion_scope", payload)
         self.assertNotIn("reply_scope", payload)
+        self.assertNotIn("stored_slug", payload)
 
     def test_admin_tag_payload_includes_access_fields(self):
         tag = Tag.objects.create(
@@ -884,10 +885,28 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
 
         self.assertEqual(response.status_code, 200, response.content)
         payload = response.json()
+        self.assertEqual(payload["stored_slug"], "admin-visible")
         self.assertTrue(payload["is_restricted"])
         self.assertEqual(payload["view_scope"], Tag.ACCESS_PUBLIC)
         self.assertEqual(payload["start_discussion_scope"], Tag.ACCESS_MEMBERS)
         self.assertEqual(payload["reply_scope"], Tag.ACCESS_STAFF)
+
+    def test_tag_payload_uses_active_slug_driver_and_keeps_stored_slug_admin_only(self):
+        set_active_slug_driver(Tag, "id_with_slug")
+
+        member_response = self.client.get(f"/api/tags/{self.public_tag.id}")
+        admin_response = self.client.get(
+            f"/api/tags/{self.public_tag.id}",
+            **self.auth_header(self.admin),
+        )
+
+        self.assertEqual(member_response.status_code, 200, member_response.content)
+        self.assertEqual(admin_response.status_code, 200, admin_response.content)
+        expected_slug = f"{self.public_tag.id}-{self.public_tag.slug}"
+        self.assertEqual(member_response.json()["slug"], expected_slug)
+        self.assertNotIn("stored_slug", member_response.json())
+        self.assertEqual(admin_response.json()["slug"], expected_slug)
+        self.assertEqual(admin_response.json()["stored_slug"], self.public_tag.slug)
 
     def test_public_tag_children_hide_admin_only_access_fields(self):
         child = Tag.objects.create(

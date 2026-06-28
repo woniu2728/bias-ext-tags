@@ -422,7 +422,7 @@ class TagService:
             counter += 1
 
     @staticmethod
-    def to_tag_slug(tag: Tag, *, driver: str = "default") -> str:
+    def to_tag_slug(tag: Tag, *, driver: str | None = None) -> str:
         runtime_slug = to_runtime_model_slug(Tag, tag, identifier=driver)
         if runtime_slug:
             return runtime_slug

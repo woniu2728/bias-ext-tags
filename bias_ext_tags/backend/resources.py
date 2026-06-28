@@ -236,7 +236,7 @@ def serialize_tag_base(tag, context: dict) -> dict:
     payload = {
         "id": tag.id,
         "name": tag.name,
-        "slug": tag.slug,
+        "slug": resolve_tag_slug(tag, context),
         "description": tag.description,
         "color": tag.color,
         "icon": tag.icon,
@@ -253,6 +253,7 @@ def serialize_tag_base(tag, context: dict) -> dict:
     }
     if can_view_tag_admin_fields(context):
         payload.update({
+            "stored_slug": tag.slug,
             "is_restricted": tag.is_restricted,
             "view_scope": tag.view_scope,
             "start_discussion_scope": tag.start_discussion_scope,
@@ -262,6 +263,12 @@ def serialize_tag_base(tag, context: dict) -> dict:
     if state is not None:
         payload["state"] = state
     return payload
+
+
+def resolve_tag_slug(tag, context: dict) -> str:
+    from bias_ext_tags.backend.services import TagService
+
+    return TagService.to_tag_slug(tag)
 
 
 def can_view_tag_admin_fields(context: dict) -> bool:
