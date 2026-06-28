@@ -1863,8 +1863,11 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
             )
 
         self.assertEqual(response.status_code, 200, response.content)
+        discussion.refresh_from_db()
         tagged_post = Post.objects.get(discussion=discussion, number=2)
         self.assertEqual(tagged_post.type, "discussionTagged")
+        self.assertEqual(discussion.last_post_id, discussion.first_post_id)
+        self.assertEqual(discussion.last_post_number, 1)
 
         posts_response = self.client.get(f"/api/discussions/{discussion.id}/posts")
         payload = posts_response.json()["data"]
