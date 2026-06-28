@@ -1,3 +1,5 @@
+import { isChildTag, isPrimaryRootTag, isSecondaryRootTag } from './tagUtils.js'
+
 export function normalizeDiscussionTagPosition(position) {
   return position === null || position === undefined ? null : Number(position)
 }
@@ -58,16 +60,14 @@ export function findDiscussionListSidebarContextParent(targetSlug, normalizedTag
 
 export function buildDiscussionListPrimaryTagItems(flatTags = [], contextParent = null) {
   return sortDiscussionListSidebarTags(flatTags).filter(tag => {
-    const position = normalizeDiscussionTagPosition(tag.position)
-    if (position === null) return false
-    if (!tag.parent_id) return true
-    return Boolean(contextParent && tag.parent_id === contextParent.id)
+    if (isPrimaryRootTag(tag)) return true
+    return Boolean(contextParent && isChildTag(tag) && tag.parent_id === contextParent.id)
   })
 }
 
 export function buildDiscussionListSecondaryTagItems(flatTags = []) {
   return sortDiscussionListSidebarTags(flatTags)
-    .filter(tag => normalizeDiscussionTagPosition(tag.position) === null)
+    .filter(isSecondaryRootTag)
     .slice(0, 3)
 }
 

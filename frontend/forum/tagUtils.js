@@ -9,6 +9,8 @@ export function normalizeTag(tag = {}) {
   return {
     ...tag,
     color: tag.color || '#6c7a89',
+    is_primary: Boolean(tag.is_primary),
+    is_child: Boolean(tag.is_child ?? tag.parent_id),
     children: unwrapTagList(tag.children).map(normalizeTag),
     last_posted_discussion: tag.last_posted_discussion || null,
   }
@@ -24,4 +26,23 @@ export function flattenTags(tags) {
 export function buildTagPath(tagOrSlug) {
   const slug = typeof tagOrSlug === 'object' ? tagOrSlug?.slug : tagOrSlug
   return `/t/${slug}`
+}
+
+export function isPrimaryRootTag(tag = {}) {
+  return Boolean(tag?.is_primary && !tag?.parent_id)
+}
+
+export function isChildTag(tag = {}) {
+  return Boolean(tag?.parent_id || tag?.is_child)
+}
+
+export function isSecondaryRootTag(tag = {}) {
+  return Boolean(!tag?.is_primary && !tag?.parent_id)
+}
+
+export function sortTagsByStructure(left = {}, right = {}) {
+  const leftPosition = left.position === null || left.position === undefined ? Number.MAX_SAFE_INTEGER : Number(left.position)
+  const rightPosition = right.position === null || right.position === undefined ? Number.MAX_SAFE_INTEGER : Number(right.position)
+  if (leftPosition !== rightPosition) return leftPosition - rightPosition
+  return String(left.name || '').localeCompare(String(right.name || ''), 'zh-CN')
 }

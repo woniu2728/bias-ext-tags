@@ -11,6 +11,10 @@
           <i class="fas fa-plus"></i>
           {{ tagsCopy?.createPrimaryLabel || '创建顶级标签' }}
         </button>
+        <button type="button" class="Button" @click="openCreateSecondaryRootModal">
+          <i class="fas fa-plus"></i>
+          {{ tagsCopy?.createSecondaryRootLabel || '创建次级顶层标签' }}
+        </button>
         <button type="button" class="Button" :disabled="refreshingStats" @click="refreshTagStats">
           <i class="fas fa-sync-alt" :class="{ 'fa-spin': refreshingStats }"></i>
           {{ refreshingStats ? (tagsCopy?.refreshingLabel || '刷新中...') : (tagsCopy?.refreshLabel || '刷新统计') }}
@@ -22,12 +26,12 @@
 
       <div class="TagsPage-list">
         <AdminStateBlock v-if="loading" tone="subtle">{{ tagsCopy?.loadingText || '加载中...' }}</AdminStateBlock>
-        <AdminStateBlock v-else-if="!tagRows.length">{{ tagsCopy?.emptyText || '暂无标签' }}</AdminStateBlock>
+        <AdminStateBlock v-else-if="!tags.length">{{ tagsCopy?.emptyText || '暂无标签' }}</AdminStateBlock>
         <div v-else class="TagsBoard">
           <section class="TagPanel">
             <div class="TagPanel-header">
               <div>
-                <h3 class="TagPanel-title">{{ tagsCopy?.rootLevelText || '顶级标签' }}</h3>
+                <h3 class="TagPanel-title">{{ tagsCopy?.rootLevelText || '主标签' }}</h3>
                 <p class="TagPanel-description">{{ tagsCopy?.primaryPanelHelpText || '用于承载论坛的主分类，可继续挂载子标签。' }}</p>
               </div>
               <span class="TagPanel-count">{{ primaryTagRows.length }}</span>
@@ -88,14 +92,54 @@
           <section class="TagPanel">
             <div class="TagPanel-header">
               <div>
-                <h3 class="TagPanel-title">{{ tagsCopy?.childLevelText || '子标签' }}</h3>
-                <p class="TagPanel-description">{{ tagsCopy?.secondaryPanelHelpText || '用于补充主分类下的细分主题，创建时需要选择父标签。' }}</p>
+                <h3 class="TagPanel-title">{{ tagsCopy?.secondaryRootLevelText || '次级顶层标签' }}</h3>
+                <p class="TagPanel-description">{{ tagsCopy?.secondaryRootPanelHelpText || '不隶属于主标签，可作为发帖时的独立次级分类。' }}</p>
               </div>
-              <span class="TagPanel-count">{{ secondaryTagRows.length }}</span>
+              <span class="TagPanel-count">{{ secondaryRootRows.length }}</span>
             </div>
 
             <div class="TagPanel-body">
-              <article v-for="row in secondaryTagRows" :key="row.tag.id" class="TagCard TagCard--secondary">
+              <article v-for="row in secondaryRootRows" :key="row.tag.id" class="TagCard TagCard--secondaryRoot">
+                <div class="TagCard-topRow">
+                  <div class="TagCard-mainRow">
+                    <span class="TagBadgePreview" :style="getTagBadgeStyle(row.tag)">
+                      <i v-if="row.tag.icon" :class="row.tag.icon"></i>
+                      <span>{{ row.tag.name }}</span>
+                    </span>
+                    <div class="TagCard-submeta">
+                      <span>{{ row.tag.discussion_count }} {{ tagsCopy?.tableDiscussionCountHeader || '讨论' }}</span>
+                    </div>
+                  </div>
+                  <div class="TagCard-inlineActions">
+                    <button type="button" class="TagCard-actionIcon" :title="tagsCopy?.editLabel || '编辑'" @click="editTag(row.tag)">
+                      <i class="fas fa-pencil-alt"></i>
+                    </button>
+                  </div>
+                </div>
+                <div v-if="row.tag.is_hidden || row.tag.is_restricted" class="TagStatusList">
+                  <span v-if="row.tag.is_hidden" class="TagStatus TagStatus--muted">{{ tagsCopy?.hiddenLabel || '隐藏标签' }}</span>
+                  <span v-if="row.tag.is_restricted" class="TagStatus TagStatus--warning">{{ tagsCopy?.restrictedLabel || '限制发帖' }}</span>
+                </div>
+              </article>
+
+              <button type="button" class="TagCreateButton TagCreateButton--secondaryRoot" @click="openCreateSecondaryRootModal">
+                <i class="fas fa-plus"></i>
+                {{ tagsCopy?.createSecondaryRootLabel || '创建次级顶层标签' }}
+              </button>
+            </div>
+          </section>
+
+          <section class="TagPanel">
+            <div class="TagPanel-header">
+              <div>
+                <h3 class="TagPanel-title">{{ tagsCopy?.childLevelText || '子标签' }}</h3>
+                <p class="TagPanel-description">{{ tagsCopy?.secondaryPanelHelpText || '用于补充主分类下的细分主题，创建时需要选择父标签。' }}</p>
+              </div>
+              <span class="TagPanel-count">{{ childTagRows.length }}</span>
+            </div>
+
+            <div class="TagPanel-body">
+              <article v-for="row in childTagRows" :key="row.tag.id" class="TagCard TagCard--secondary">
                 <div class="TagCard-topRow">
                   <span class="TagBadgePreview" :style="getTagBadgeStyle(row.tag)">
                     <i v-if="row.tag.icon" :class="row.tag.icon"></i>
@@ -201,6 +245,24 @@
 
           <div class="FormRow">
             <div class="Form-group">
+              <label class="CheckboxField TagToggle TagToggle--switch">
+                <input
+                  v-model="formData.is_primary"
+                  name="tag_is_primary"
+                  type="checkbox"
+                  :disabled="Boolean(formData.parent_id)"
+                />
+                <span class="TagToggle-switch" aria-hidden="true"></span>
+                <span>{{ tagsCopy?.primaryFlagLabel || '作为主标签参与排序' }}</span>
+              </label>
+              <div class="Form-help">
+                {{ formData.parent_id
+                  ? (tagsCopy?.primaryFlagChildHelpText || '子标签会随父标签参与主标签结构。')
+                  : (tagsCopy?.primaryFlagHelpText || '关闭后保存为次级顶层标签，不参与主标签树排序。') }}
+              </div>
+            </div>
+
+            <div class="Form-group">
               <label class="Form-labelStrong">{{ tagsCopy?.parentLabel || '父标签' }}</label>
               <AdminSelectMenu
                 input-id="tag-parent-select"
@@ -217,7 +279,7 @@
               </div>
             </div>
 
-            <div class="Form-group">
+            <div v-if="formData.is_primary || formData.parent_id" class="Form-group">
               <label for="tag-position">{{ tagsCopy?.positionLabel || '排序位置' }}</label>
               <input
                 id="tag-position"
@@ -489,20 +551,25 @@ const filteredIconOptions = computed(() => {
   )
 })
 
+const primaryTags = computed(() => tags.value.filter(isPrimaryRootTag))
+const secondaryRootTags = computed(() => tags.value.filter(isSecondaryRootTag))
+const childTags = computed(() => tags.value.filter(isChildTag))
 const tagTree = computed(() => buildTagTree(tags.value))
 const tagRows = computed(() => flattenTagTree(tagTree.value))
-const primaryTagRows = computed(() => tagRows.value.filter(row => row.depth === 0))
-const secondaryTagRows = computed(() => tagRows.value.filter(row => row.depth > 0))
+const primaryTagRows = computed(() => tagRows.value.filter(row => row.depth === 0 && isPrimaryRootTag(row.tag)))
+const secondaryRootRows = computed(() => secondaryRootTags.value.slice().sort(sortTagNodesFlat).map(tag => ({ tag, depth: 0, parentName: null })))
+const childTagRows = computed(() => tagRows.value.filter(row => row.depth > 0))
 const tagSummary = computed(() => ({
   total: tags.value.length,
-  root: tags.value.filter(tag => !tag.parent_id).length,
-  child: tags.value.filter(tag => Boolean(tag.parent_id)).length,
+  root: primaryTags.value.length,
+  secondary: secondaryRootTags.value.length,
+  child: childTags.value.length,
   hidden: tags.value.filter(tag => tag.is_hidden).length,
   restricted: tags.value.filter(tag => tag.is_restricted).length,
 }))
 const tagSummaryItems = computed(() => [
   { label: tagsCopy.value?.summaryTagTotalLabel || '标签总数', value: tagSummary.value.total },
-  { label: tagsCopy.value?.summaryTagHierarchyLabel || '顶级 / 子标签', value: `${tagSummary.value.root} / ${tagSummary.value.child}` },
+  { label: tagsCopy.value?.summaryTagHierarchyLabel || '主 / 次 / 子标签', value: `${tagSummary.value.root} / ${tagSummary.value.secondary} / ${tagSummary.value.child}` },
   { label: tagsCopy.value?.summaryHiddenLabel || '隐藏标签', value: tagSummary.value.hidden },
   { label: tagsCopy.value?.summaryRestrictedLabel || '限制发帖', value: tagSummary.value.restricted },
 ])
@@ -515,7 +582,7 @@ const availableParentOptions = computed(() => {
   const blockedIds = editingId ? new Set([editingId, ...collectDescendantIds(tags.value, editingId)]) : new Set()
 
   return tagRows.value
-    .filter(row => row.depth === 0 && !blockedIds.has(row.tag.id))
+    .filter(row => row.depth === 0 && isPrimaryRootTag(row.tag) && !blockedIds.has(row.tag.id))
     .map(row => ({
       id: row.tag.id,
       label: row.tag.name
@@ -534,6 +601,9 @@ const availableReplyScopeOptions = computed(() => {
   return tagScopeOptions.value.filter(option => getScopeLevel(option.value) >= minimumLevel)
 })
 const positionHelpText = computed(() => {
+  if (!formData.value.is_primary && !formData.value.parent_id) {
+    return tagsCopy.value?.positionHelpSecondaryText || '次级顶层标签不参与主标签排序，会在独立区域按名称展示。'
+  }
   const parentText = formData.value.parent_id
     ? (tagsCopy.value?.positionHelpParentText || '当前父标签下')
     : (tagsCopy.value?.positionHelpRootText || '顶级标签层')
@@ -558,6 +628,30 @@ watch(
   }
 )
 
+watch(
+  () => formData.value.parent_id,
+  parentId => {
+    if (parentId) {
+      formData.value.is_primary = true
+      if (formData.value.position === null || formData.value.position === undefined) {
+        formData.value.position = getNextPosition(tags.value, parentId)
+      }
+    }
+  }
+)
+
+watch(
+  () => formData.value.is_primary,
+  isPrimary => {
+    if (!isPrimary) {
+      formData.value.parent_id = null
+      formData.value.position = null
+    } else if (formData.value.position === null || formData.value.position === undefined) {
+      formData.value.position = getNextPosition(tags.value, formData.value.parent_id)
+    }
+  }
+)
+
 async function loadTags() {
   loading.value = true
   loadError.value = ''
@@ -577,6 +671,7 @@ function openCreateModal() {
   iconSearch.value = ''
   formData.value = getEmptyForm({
     position: getNextPosition(tags.value, null),
+    is_primary: true,
   })
   showCreateModal.value = true
 }
@@ -592,6 +687,18 @@ function openCreateSecondaryModal() {
   formData.value = getEmptyForm({
     parent_id: parentId,
     position: getNextPosition(tags.value, parentId),
+    is_primary: true,
+  })
+  showCreateModal.value = true
+}
+
+function openCreateSecondaryRootModal() {
+  editingTag.value = null
+  iconSearch.value = ''
+  formData.value = getEmptyForm({
+    parent_id: null,
+    position: null,
+    is_primary: false,
   })
   showCreateModal.value = true
 }
@@ -607,6 +714,7 @@ function editTag(tag) {
     icon: tag.icon,
     position: tag.position,
     parent_id: tag.parent_id ?? null,
+    is_primary: Boolean(tag.is_primary),
     is_hidden: Boolean(tag.is_hidden),
     is_restricted: Boolean(tag.is_restricted),
     view_scope: tag.view_scope || 'public',
@@ -635,8 +743,9 @@ async function saveTag() {
       description: (formData.value.description || '').trim(),
       color: formData.value.color || '#888888',
       icon: (formData.value.icon || '').trim(),
-      position: Number(formData.value.position || 0),
+      position: formData.value.is_primary || formData.value.parent_id ? Number(formData.value.position || 0) : null,
       parent_id: formData.value.parent_id ?? null,
+      is_primary: Boolean(formData.value.parent_id || formData.value.is_primary),
       is_hidden: Boolean(formData.value.is_hidden),
       is_restricted: Boolean(formData.value.is_restricted),
       view_scope: formData.value.view_scope || 'public',
@@ -768,6 +877,7 @@ function getEmptyForm(overrides = {}) {
     icon: '',
     position: 0,
     parent_id: null,
+    is_primary: true,
     is_hidden: false,
     is_restricted: false,
     view_scope: 'public',
@@ -807,7 +917,7 @@ function getTagBadgeStyle(tag) {
 }
 
 function buildTagTree(sourceTags) {
-  const records = sourceTags.map(tag => ({
+  const records = sourceTags.filter(tag => !isSecondaryRootTag(tag)).map(tag => ({
     ...tag,
     children: [],
   }))
@@ -861,16 +971,18 @@ function normalizeTagListResponse(response, fallback = []) {
 }
 
 function sortTagNodes(nodes) {
-  nodes.sort((left, right) => {
-    const leftPosition = Number(left.position ?? 0)
-    const rightPosition = Number(right.position ?? 0)
-    if (leftPosition !== rightPosition) return leftPosition - rightPosition
-    return String(left.name || '').localeCompare(String(right.name || ''), 'zh-CN')
-  })
+  nodes.sort(sortTagNodesFlat)
 
   for (const node of nodes) {
     sortTagNodes(node.children)
   }
+}
+
+function sortTagNodesFlat(left, right) {
+  const leftPosition = Number(left.position ?? Number.MAX_SAFE_INTEGER)
+  const rightPosition = Number(right.position ?? Number.MAX_SAFE_INTEGER)
+  if (leftPosition !== rightPosition) return leftPosition - rightPosition
+  return String(left.name || '').localeCompare(String(right.name || ''), 'zh-CN')
 }
 
 function flattenTagTree(nodes, depth = 0, parentName = null) {
@@ -886,6 +998,9 @@ function collectDescendantIds(sourceTags, tagId) {
 }
 
 function getSiblingRows(tag) {
+  if (isSecondaryRootTag(tag)) {
+    return secondaryRootRows.value
+  }
   return tagRows.value.filter(row => (row.tag.parent_id ?? null) === (tag.parent_id ?? null))
 }
 
@@ -900,6 +1015,7 @@ function canMoveTag(tag, direction) {
 
 function getSiblingCount(parentId, excludeTagId = null) {
   return tags.value.filter(tag => {
+    if (parentId === null && isSecondaryRootTag(tag)) return false
     if ((tag.parent_id ?? null) !== (parentId ?? null)) return false
     if (excludeTagId && tag.id === excludeTagId) return false
     return true
@@ -907,10 +1023,12 @@ function getSiblingCount(parentId, excludeTagId = null) {
 }
 
 function getPreviewRank(parentId, position, excludeTagId = null) {
+  if (!formData.value.is_primary && !formData.value.parent_id) return 1
   const numericPosition = Number(position || 0)
   const siblings = tags.value
     .filter(tag => {
       if ((tag.parent_id ?? null) !== (parentId ?? null)) return false
+      if (parentId === null && isSecondaryRootTag(tag)) return false
       if (excludeTagId && tag.id === excludeTagId) return false
       return true
     })
@@ -922,7 +1040,7 @@ function getPreviewRank(parentId, position, excludeTagId = null) {
 
 function getNextPosition(sourceTags, parentId) {
   const siblingPositions = sourceTags
-    .filter(tag => (tag.parent_id ?? null) === (parentId ?? null))
+    .filter(tag => (tag.parent_id ?? null) === (parentId ?? null) && !isSecondaryRootTag(tag))
     .map(tag => Number(tag.position || 0))
 
   return siblingPositions.length ? Math.max(...siblingPositions) + 1 : 0
@@ -930,6 +1048,18 @@ function getNextPosition(sourceTags, parentId) {
 
 function getChildTagCount(tagId) {
   return tags.value.filter(tag => tag.parent_id === tagId).length
+}
+
+function isPrimaryRootTag(tag) {
+  return Boolean(tag?.is_primary && !tag?.parent_id)
+}
+
+function isChildTag(tag) {
+  return Boolean(tag?.parent_id)
+}
+
+function isSecondaryRootTag(tag) {
+  return Boolean(!tag?.is_primary && !tag?.parent_id)
 }
 </script>
 

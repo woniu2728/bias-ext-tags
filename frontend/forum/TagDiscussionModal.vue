@@ -83,7 +83,15 @@ import {
   getUiCopy
 } from '@bias/core/forum'
 import { normalizeDiscussion } from '@bias/discussions'
-import { flattenTags, normalizeTag, unwrapTagList } from './tagUtils.js'
+import {
+  flattenTags,
+  isChildTag,
+  isPrimaryRootTag,
+  isSecondaryRootTag,
+  normalizeTag,
+  sortTagsByStructure,
+  unwrapTagList,
+} from './tagUtils.js'
 
 const props = defineProps({
   discussion: {
@@ -106,11 +114,12 @@ const form = reactive({
   secondary_tag_id: '',
 })
 
-const primaryTags = computed(() => tags.value.filter(tag => !tag.parent_id))
+const primaryTags = computed(() => tags.value.filter(isPrimaryRootTag).sort(sortTagsByStructure))
+const rootSecondaryTags = computed(() => tags.value.filter(isSecondaryRootTag).sort(sortTagsByStructure))
 const secondaryTagOptions = computed(() => {
-  if (!form.primary_tag_id) return []
+  if (!form.primary_tag_id) return rootSecondaryTags.value
   const primaryTag = primaryTags.value.find(tag => String(tag.id) === String(form.primary_tag_id))
-  return primaryTag?.children || []
+  return primaryTag?.children?.filter(isChildTag).sort(sortTagsByStructure) || []
 })
 const selectedTagIds = computed(() => {
   return [form.primary_tag_id, form.secondary_tag_id]
@@ -129,7 +138,7 @@ const hasChanged = computed(() => {
 const canSubmit = computed(() => {
   return Boolean(
     props.discussion?.id
-    && form.primary_tag_id
+    && selectedTagIds.value.length
     && !loading.value
     && !submitting.value
     && hasChanged.value
@@ -190,8 +199,8 @@ async function loadTags() {
 
 function syncDiscussionTags() {
   const currentTags = flattenTags(props.discussion?.tags || [])
-  const primaryTag = currentTags.find(tag => !tag.parent_id)
-  const secondaryTag = currentTags.find(tag => tag.parent_id)
+  const primaryTag = currentTags.find(isPrimaryRootTag)
+  const secondaryTag = currentTags.find(tag => isChildTag(tag) || isSecondaryRootTag(tag))
   form.primary_tag_id = primaryTag?.id ? String(primaryTag.id) : ''
   form.secondary_tag_id = secondaryTag?.id ? String(secondaryTag.id) : ''
 }

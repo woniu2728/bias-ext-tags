@@ -14,7 +14,15 @@ import DiscussionSidebarTagsSection from './DiscussionSidebarTagsSection.vue'
 import TagDiscussionModal from './TagDiscussionModal.vue'
 import { createTagSearchSource } from './tagSearchSource.js'
 import { TagModel } from './tagModel.js'
-import { buildTagPath, flattenTags, normalizeTag, unwrapTagList } from './tagUtils.js'
+import {
+  buildTagPath,
+  flattenTags,
+  isChildTag,
+  isPrimaryRootTag,
+  isSecondaryRootTag,
+  normalizeTag,
+  unwrapTagList,
+} from './tagUtils.js'
 
 export const extend = [
   new Store()
@@ -616,8 +624,8 @@ function registerTagsForum(forum) {
     isVisible: ({ submitKind, discussion }) => submitKind === 'edit-discussion' && Array.isArray(discussion?.tags),
     contribute({ discussion }) {
       const currentTags = flattenTags(discussion.tags || [])
-      const primaryTag = currentTags.find(tag => !tag.parent_id)
-      const secondaryTag = currentTags.find(tag => tag.parent_id)
+      const primaryTag = currentTags.find(isPrimaryRootTag)
+      const secondaryTag = currentTags.find(tag => isChildTag(tag) || isSecondaryRootTag(tag))
       const selectedTagIds = [primaryTag?.id, secondaryTag?.id]
         .filter(Boolean)
         .map(value => parseInt(value, 10))
@@ -665,7 +673,7 @@ function registerTagsForum(forum) {
     order: 30,
     isVisible: context => {
       const state = getTagsComposerState(context)
-      return context.type === 'discussion' && !state.loadingTags && Number(state.availablePrimaryTagCount || 0) <= 0
+      return context.type === 'discussion' && !state.loadingTags && Number(state.availableTagCount ?? state.availablePrimaryTagCount ?? 0) <= 0
     },
     resolve: () => ({
       label: '标签',
@@ -680,12 +688,12 @@ function registerTagsForum(forum) {
     order: 40,
     isVisible: context => {
       const state = getTagsComposerState(context)
-      return context.type === 'discussion' && Number(state.availablePrimaryTagCount || 0) > 0 && !state.primaryTagId
+      return context.type === 'discussion' && Number(state.availableTagCount ?? state.availablePrimaryTagCount ?? 0) > 0 && Number(state.selectedTagCount || 0) <= 0
     },
     resolve: () => ({
       label: '标签',
       tone: 'info',
-      message: '先选择主标签，再发布讨论。',
+      message: '先选择标签，再发布讨论。',
     }),
   })
 
@@ -703,17 +711,17 @@ function registerTagsForum(forum) {
         }
       }
 
-      if (Number(state.availablePrimaryTagCount || 0) <= 0) {
+      if (Number(state.availableTagCount ?? state.availablePrimaryTagCount ?? 0) <= 0) {
         return {
           tone: 'error',
-          message: '当前没有可用主标签，暂时无法发布讨论。',
+          message: '当前没有可用标签，暂时无法发布讨论。',
         }
       }
 
-      if (state.primaryTagId) return null
+      if (Number(state.selectedTagCount || 0) > 0) return null
       return {
         tone: 'error',
-        message: '请选择主标签后再发布讨论。',
+        message: '请选择标签后再发布讨论。',
       }
     },
   })

@@ -36,7 +36,15 @@ import {
   ref } from '@bias/core'
 import { getUiCopy
 } from '@bias/core/forum'
-import { flattenTags, normalizeTag, unwrapTagList } from './tagUtils.js'
+import {
+  flattenTags,
+  isChildTag,
+  isPrimaryRootTag,
+  isSecondaryRootTag,
+  normalizeTag,
+  sortTagsByStructure,
+  unwrapTagList,
+} from './tagUtils.js'
 
 const props = defineProps({
   closeComposer: {
@@ -75,11 +83,12 @@ const primaryTagId = ref('')
 const secondaryTagId = ref('')
 
 const availableTags = computed(() => flattenTags(tags.value))
-const primaryTags = computed(() => tags.value.filter(tag => !tag.parent_id))
+const primaryTags = computed(() => tags.value.filter(isPrimaryRootTag).sort(sortTagsByStructure))
+const rootSecondaryTags = computed(() => tags.value.filter(isSecondaryRootTag).sort(sortTagsByStructure))
 const secondaryTagOptions = computed(() => {
-  if (!primaryTagId.value) return []
+  if (!primaryTagId.value) return rootSecondaryTags.value
   const primaryTag = primaryTags.value.find(tag => String(tag.id) === String(primaryTagId.value))
-  return primaryTag?.children || []
+  return primaryTag?.children?.filter(isChildTag).sort(sortTagsByStructure) || []
 })
 const selectedTagIds = computed(() => {
   return [primaryTagId.value, secondaryTagId.value]
@@ -151,14 +160,21 @@ function applyRequestedTag(tagId) {
     return
   }
 
-  if (requestedTag.parent_id) {
+  if (isChildTag(requestedTag)) {
     primaryTagId.value = String(requestedTag.parent_id)
     secondaryTagId.value = String(requestedTag.id)
     syncState()
     return
   }
 
-  primaryTagId.value = String(requestedTag.id)
+  if (isSecondaryRootTag(requestedTag)) {
+    primaryTagId.value = ''
+    secondaryTagId.value = String(requestedTag.id)
+    syncState()
+    return
+  }
+
+  primaryTagId.value = isPrimaryRootTag(requestedTag) ? String(requestedTag.id) : ''
   handlePrimaryTagChange()
 }
 
@@ -172,9 +188,11 @@ function handlePrimaryTagChange() {
 function syncState() {
   props.updateState({
     availablePrimaryTagCount: primaryTags.value.length,
+    availableTagCount: primaryTags.value.length + rootSecondaryTags.value.length,
     loadingTags: loadingTags.value,
     primaryTagId: primaryTagId.value,
     secondaryTagId: secondaryTagId.value,
+    selectedTagCount: selectedTagIds.value.length,
     selectedTagIds: selectedTagIds.value,
     selectedTagLabel: selectedTagLabel.value,
   })
