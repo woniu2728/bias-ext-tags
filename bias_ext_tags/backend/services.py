@@ -312,33 +312,61 @@ class TagService:
         if user and (user.is_staff or user.is_superuser):
             return queryset
 
+        visibility_filter = TagService._tag_visibility_filter(user, action=action)
+        if visibility_filter is None:
+            return queryset
+        return queryset.filter(visibility_filter)
+
+    @staticmethod
+    def _tag_visibility_filter(user: Optional[Any], action: str = "view"):
         scope_field = TagService.ACTION_SCOPE_FIELD.get(action)
         if not scope_field:
-            return queryset
+            return None
 
-        if user and user.is_authenticated:
-            queryset = queryset.exclude(**{scope_field: Tag.ACCESS_STAFF})
-        else:
-            queryset = queryset.exclude(**{f"{scope_field}__in": [Tag.ACCESS_MEMBERS, Tag.ACCESS_STAFF]})
+        own_visibility = TagService._tag_scope_filter(user, scope_field)
+        parent_visibility = Q(parent_id__isnull=True) | TagService._tag_scope_filter(
+            user,
+            scope_field,
+            prefix="parent__",
+        )
 
         restricted_permission = TagService.ACTION_RESTRICTED_PERMISSION.get(action)
         if not restricted_permission:
-            return queryset
+            return own_visibility & parent_visibility
 
         allowed_restricted_tag_ids = TagService._restricted_tag_ids_with_permission(
             user,
             restricted_permission,
         )
-        return queryset.filter(Q(is_restricted=False) | Q(id__in=allowed_restricted_tag_ids))
+        own_restricted = TagService._tag_restricted_filter(allowed_restricted_tag_ids)
+        parent_restricted = Q(parent_id__isnull=True) | TagService._tag_restricted_filter(
+            allowed_restricted_tag_ids,
+            prefix="parent__",
+        )
+        return own_visibility & own_restricted & parent_visibility & parent_restricted
+
+    @staticmethod
+    def _tag_scope_filter(user: Optional[Any], scope_field: str, *, prefix: str = ""):
+        field = f"{prefix}{scope_field}"
+        if user and getattr(user, "is_authenticated", False):
+            return Q(**{f"{field}__in": [Tag.ACCESS_PUBLIC, Tag.ACCESS_MEMBERS]})
+        return Q(**{field: Tag.ACCESS_PUBLIC})
+
+    @staticmethod
+    def _tag_restricted_filter(allowed_restricted_tag_ids: tuple[int, ...], *, prefix: str = ""):
+        restricted_field = f"{prefix}is_restricted"
+        id_field = f"{prefix}id"
+        visibility = Q(**{restricted_field: False})
+        if allowed_restricted_tag_ids:
+            visibility |= Q(**{f"{id_field}__in": allowed_restricted_tag_ids})
+        return visibility
 
     @staticmethod
     def get_forbidden_tag_ids(user: Optional[Any], action: str = "view") -> List[int]:
-        allowed_tag_ids = TagService.filter_tags_for_user(
-            Tag.objects.all(),
-            user,
-            action=action,
-        ).values_list("id", flat=True)
-        return list(Tag.objects.exclude(id__in=allowed_tag_ids).values_list("id", flat=True))
+        forbidden_tag_ids = TagService._forbidden_tag_ids_queryset(user, action=action)
+        if forbidden_tag_ids is None:
+            return []
+        return list(forbidden_tag_ids.values_list("id", flat=True))
 
     @staticmethod
     def filter_discussions_for_user(queryset: QuerySet, user: Optional[Any]) -> QuerySet:
@@ -374,12 +402,10 @@ class TagService:
     def _forbidden_tag_ids_queryset(user: Optional[Any], action: str = "view"):
         if user and (user.is_staff or user.is_superuser):
             return None
-        allowed_tag_ids = TagService.filter_tags_for_user(
-            Tag.objects.all(),
-            user,
-            action=action,
-        ).values("id")
-        return Tag.objects.exclude(id__in=allowed_tag_ids).values("id")
+        visibility_filter = TagService._tag_visibility_filter(user, action=action)
+        if visibility_filter is None:
+            return None
+        return Tag.objects.exclude(visibility_filter).values("id")
 
     @staticmethod
     def _restricted_tag_ids_with_permission(user: Optional[Any], ability: str) -> tuple[int, ...]:

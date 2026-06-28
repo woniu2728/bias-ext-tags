@@ -1173,6 +1173,49 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertNotIn("start_discussion_scope", child_payload)
         self.assertNotIn("reply_scope", child_payload)
 
+    def test_tag_list_hides_child_when_restricted_parent_is_not_visible(self):
+        parent = Tag.objects.create(
+            name="列表受限父标签",
+            slug="list-restricted-parent",
+            is_restricted=True,
+            view_scope=Tag.ACCESS_PUBLIC,
+            start_discussion_scope=Tag.ACCESS_MEMBERS,
+            reply_scope=Tag.ACCESS_MEMBERS,
+        )
+        child = Tag.objects.create(
+            name="列表受限子标签",
+            slug="list-restricted-child",
+            parent=parent,
+            is_restricted=True,
+            view_scope=Tag.ACCESS_PUBLIC,
+            start_discussion_scope=Tag.ACCESS_MEMBERS,
+            reply_scope=Tag.ACCESS_MEMBERS,
+        )
+        group = Group.objects.create(name="ChildOnlyVisible", color="#4d698e")
+        Permission.objects.create(group=group, permission=f"tag{child.id}.viewForum")
+        self.member.user_groups.add(group)
+
+        child_only_response = self.client.get(
+            "/api/tags",
+            {"parent_id": parent.id},
+            **self.auth_header(self.member),
+        )
+
+        self.assertEqual(child_only_response.status_code, 200, child_only_response.content)
+        self.assertNotIn(child.slug, {tag["slug"] for tag in child_only_response.json()["data"]})
+
+        Permission.objects.create(group=group, permission=f"tag{parent.id}.viewForum")
+        if hasattr(self.member, "_forum_permission_cache"):
+            delattr(self.member, "_forum_permission_cache")
+        parent_allowed_response = self.client.get(
+            "/api/tags",
+            {"parent_id": parent.id},
+            **self.auth_header(self.member),
+        )
+
+        self.assertEqual(parent_allowed_response.status_code, 200, parent_allowed_response.content)
+        self.assertIn(child.slug, {tag["slug"] for tag in parent_allowed_response.json()["data"]})
+
     def test_tag_payload_exposes_primary_and_child_flags(self):
         child = Tag.objects.create(
             name="子结构",
@@ -2778,6 +2821,53 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
         sql = " ".join(query["sql"].lower() for query in queries)
         self.assertIn(" in (select", sql)
         self.assertNotIn('from "tags" where "tags"."is_restricted"', sql)
+
+    def test_discussion_list_child_permission_does_not_bypass_restricted_parent(self):
+        parent = Tag.objects.create(
+            name="讨论受限父标签",
+            slug="discussion-restricted-parent",
+            is_restricted=True,
+            view_scope=Tag.ACCESS_PUBLIC,
+            start_discussion_scope=Tag.ACCESS_MEMBERS,
+            reply_scope=Tag.ACCESS_MEMBERS,
+        )
+        child = Tag.objects.create(
+            name="讨论受限子标签",
+            slug="discussion-restricted-child",
+            parent=parent,
+            is_restricted=True,
+            view_scope=Tag.ACCESS_PUBLIC,
+            start_discussion_scope=Tag.ACCESS_MEMBERS,
+            reply_scope=Tag.ACCESS_MEMBERS,
+        )
+        admin = User.objects.create_superuser(
+            username="discussion-restricted-parent-admin",
+            email="discussion-restricted-parent-admin@example.com",
+            password="password123",
+        )
+        discussion = create_runtime_discussion(
+            title="Restricted parent child discussion",
+            content="Child permission must not bypass parent visibility.",
+            user=admin,
+            extension_payload=discussion_tags_payload([parent.id, child.id]),
+        )
+        group = Group.objects.create(name="DiscussionChildOnlyVisible", color="#4d698e")
+        Permission.objects.create(group=group, permission="viewForum")
+        Permission.objects.create(group=group, permission=f"tag{child.id}.viewForum")
+        self.reader.user_groups.add(group)
+
+        denied_response = self.client.get("/api/discussions/", **self.auth_header(self.reader))
+
+        self.assertEqual(denied_response.status_code, 200, denied_response.content)
+        self.assertNotIn(discussion.id, {item["id"] for item in denied_response.json()["data"]})
+
+        Permission.objects.create(group=group, permission=f"tag{parent.id}.viewForum")
+        if hasattr(self.reader, "_forum_permission_cache"):
+            delattr(self.reader, "_forum_permission_cache")
+        allowed_response = self.client.get("/api/discussions/", **self.auth_header(self.reader))
+
+        self.assertEqual(allowed_response.status_code, 200, allowed_response.content)
+        self.assertIn(discussion.id, {item["id"] for item in allowed_response.json()["data"]})
 
     def test_discussion_list_does_not_re_enumerate_tags_for_permission_scopes(self):
         tags = [
