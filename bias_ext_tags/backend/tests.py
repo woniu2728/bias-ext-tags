@@ -89,6 +89,14 @@ def set_active_slug_driver(model, identifier: str):
     clear_runtime_setting_caches()
 
 
+def set_tags_setting(key: str, value):
+    Setting.objects.update_or_create(
+        key=f"extensions.tags.{key}",
+        defaults={"value": json.dumps(value)},
+    )
+    clear_runtime_setting_caches()
+
+
 def discussion_tags_payload(tag_ids):
     return {
         "data": {
@@ -292,6 +300,165 @@ class TagsExtensionRuntimeTests(ExtensionRuntimeTestMixin, TestCase):
 
         self.assertTrue(can(member, "addToDiscussion", tag))
         self.assertTrue(can(member, "add_to_discussion", tag))
+
+    def test_tag_global_policy_allows_start_discussion_from_accessible_primary_tag(self):
+        from bias_core.authorization import can
+
+        self.bootstrap_extensions("tags")
+        member = User.objects.create_user(
+            username="tag-global-primary-member",
+            email="tag-global-primary-member@example.com",
+            password="password123",
+        )
+        group = Group.objects.create(name="TagGlobalPrimary", color="#4d698e")
+        member.user_groups.add(group)
+        primary = Tag.objects.create(
+            name="全局主标签",
+            slug="global-primary",
+            position=0,
+            is_restricted=True,
+            start_discussion_scope=Tag.ACCESS_MEMBERS,
+        )
+        Permission.objects.create(group=group, permission=f"tag{primary.id}.startDiscussion")
+        if hasattr(member, "_forum_permission_cache"):
+            delattr(member, "_forum_permission_cache")
+        set_tags_setting("min_primary_tags", 1)
+
+        self.assertTrue(can(member, "startDiscussion"))
+
+    def test_tag_global_policy_denies_start_discussion_from_child_tag_only(self):
+        from bias_core.authorization import can
+
+        self.bootstrap_extensions("tags")
+        member = User.objects.create_user(
+            username="tag-global-child-member",
+            email="tag-global-child-member@example.com",
+            password="password123",
+        )
+        group = Group.objects.create(name="TagGlobalChildOnly", color="#4d698e")
+        member.user_groups.add(group)
+        parent = Tag.objects.create(
+            name="全局父标签",
+            slug="global-parent",
+            position=0,
+            is_restricted=True,
+            start_discussion_scope=Tag.ACCESS_MEMBERS,
+        )
+        child = Tag.objects.create(
+            name="全局子标签",
+            slug="global-child",
+            parent=parent,
+            is_restricted=True,
+            start_discussion_scope=Tag.ACCESS_MEMBERS,
+        )
+        Permission.objects.create(group=group, permission=f"tag{child.id}.startDiscussion")
+        if hasattr(member, "_forum_permission_cache"):
+            delattr(member, "_forum_permission_cache")
+        set_tags_setting("min_primary_tags", 1)
+
+        self.assertFalse(can(member, "startDiscussion"))
+
+    def test_tag_global_policy_allows_secondary_when_minimums_match(self):
+        from bias_core.authorization import can
+
+        self.bootstrap_extensions("tags")
+        member = User.objects.create_user(
+            username="tag-global-secondary-member",
+            email="tag-global-secondary-member@example.com",
+            password="password123",
+        )
+        group = Group.objects.create(name="TagGlobalSecondary", color="#4d698e")
+        member.user_groups.add(group)
+        parent = Tag.objects.create(
+            name="全局次标签父级",
+            slug="global-secondary-parent",
+            position=0,
+            start_discussion_scope=Tag.ACCESS_MEMBERS,
+        )
+        secondary = Tag.objects.create(
+            name="全局次标签",
+            slug="global-secondary",
+            parent=parent,
+            is_restricted=True,
+            start_discussion_scope=Tag.ACCESS_MEMBERS,
+        )
+        Permission.objects.create(group=group, permission=f"tag{parent.id}.startDiscussion")
+        Permission.objects.create(group=group, permission=f"tag{secondary.id}.startDiscussion")
+        if hasattr(member, "_forum_permission_cache"):
+            delattr(member, "_forum_permission_cache")
+        set_tags_setting("min_primary_tags", 0)
+        set_tags_setting("min_secondary_tags", 1)
+
+        self.assertTrue(can(member, "startDiscussion"))
+
+    def test_tag_global_policy_bypass_requires_start_discussion_permission(self):
+        from bias_core.authorization import can
+
+        self.bootstrap_extensions("tags")
+        member = User.objects.create_user(
+            username="tag-global-bypass-member",
+            email="tag-global-bypass-member@example.com",
+            password="password123",
+        )
+        group = Group.objects.create(name="TagGlobalBypass", color="#4d698e")
+        member.user_groups.add(group)
+        Tag.objects.create(
+            name="全局绕过主标签",
+            slug="global-bypass-primary",
+            position=0,
+            is_restricted=True,
+            start_discussion_scope=Tag.ACCESS_MEMBERS,
+        )
+        set_tags_setting("min_primary_tags", 1)
+
+        Permission.objects.create(group=group, permission="bypassTagCounts")
+        if hasattr(member, "_forum_permission_cache"):
+            delattr(member, "_forum_permission_cache")
+        self.assertFalse(can(member, "startDiscussion"))
+
+        Permission.objects.create(group=group, permission="startDiscussion")
+        if hasattr(member, "_forum_permission_cache"):
+            delattr(member, "_forum_permission_cache")
+        self.assertTrue(can(member, "startDiscussion"))
+
+    def test_tag_global_policy_caches_tag_counts_per_user_and_action(self):
+        from bias_core.authorization import can
+
+        self.bootstrap_extensions("tags")
+        member = User.objects.create_user(
+            username="tag-global-cache-member",
+            email="tag-global-cache-member@example.com",
+            password="password123",
+        )
+        group = Group.objects.create(name="TagGlobalCache", color="#4d698e")
+        member.user_groups.add(group)
+        primary = Tag.objects.create(
+            name="全局缓存主标签",
+            slug="global-cache-primary",
+            position=0,
+            is_restricted=True,
+            start_discussion_scope=Tag.ACCESS_MEMBERS,
+        )
+        Permission.objects.create(group=group, permission=f"tag{primary.id}.startDiscussion")
+        if hasattr(member, "_forum_permission_cache"):
+            delattr(member, "_forum_permission_cache")
+        set_tags_setting("min_primary_tags", 1)
+
+        with CaptureQueriesContext(connection) as queries:
+            self.assertTrue(can(member, "startDiscussion"))
+            self.assertTrue(can(member, "startDiscussion"))
+
+        tag_count_queries = [
+            query["sql"]
+            for query in queries
+            if 'from "tags"' in query["sql"].lower()
+            and "count" in query["sql"].lower()
+        ]
+        self.assertLessEqual(
+            len(tag_count_queries),
+            4,
+            "Tag global policy should cache primary/secondary tag count checks per user and action.",
+        )
 
     def test_tag_service_management_checks_use_forum_permissions(self):
         self.bootstrap_extensions("tags")

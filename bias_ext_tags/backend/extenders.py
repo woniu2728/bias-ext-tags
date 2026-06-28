@@ -55,7 +55,7 @@ from bias_ext_tags.backend.model_contracts import (
     post_model_visibility_definitions,
 )
 from bias_ext_tags.backend.models import DiscussionTag, Tag, TagState
-from bias_ext_tags.backend.policies import DiscussionPolicy, PostPolicy, TagPolicy
+from bias_ext_tags.backend.policies import DiscussionPolicy, GlobalPolicy, PostPolicy, TagPolicy
 from bias_ext_tags.backend.permissions import grant_staff_tag_management_permissions
 from bias_ext_tags.backend.post_lifecycle import (
     apply_post_approved,
@@ -175,6 +175,7 @@ def search_extenders():
 def policy_extenders():
     return (
         PolicyExtender()
+        .global_policy(GlobalPolicy)
         .policy(DISCUSSION_MODEL, DiscussionPolicy)
         .policy(Tag, TagPolicy),
     )

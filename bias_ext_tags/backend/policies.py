@@ -42,6 +42,11 @@ class PostPolicy(AuthorizationPolicy):
         return TagService.can_view_discussion_tags(discussion, user)
 
 
+class GlobalPolicy(AuthorizationPolicy):
+    def can(self, user, ability, model=None, **context):
+        return TagService.global_tag_ability_decision(user, ability)
+
+
 class TagPolicy(AuthorizationPolicy):
     def can(self, user, ability, model, **context):
         return TagService.can_tag_ability(model, user, ability)

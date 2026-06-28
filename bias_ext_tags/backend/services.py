@@ -65,6 +65,17 @@ class TagService:
         Tag.ACCESS_MEMBERS: 1,
         Tag.ACCESS_STAFF: 2,
     }
+    TAG_GLOBAL_POLICY_ABILITIES = {
+        "viewForum": "view",
+        "startDiscussion": "start_discussion",
+    }
+
+    @staticmethod
+    def _settings_int(settings: dict, key: str, default: int = 0) -> int:
+        try:
+            return max(0, int(settings.get(key, default)))
+        except (TypeError, ValueError):
+            return default
 
     @staticmethod
     def normalize_access_scope(scope: Optional[str], default: str) -> str:
@@ -306,6 +317,62 @@ class TagService:
         state.marked_as_read_at = marked_as_read_at or timezone.now()
         state.save(update_fields=["marked_as_read_at"])
         return state
+
+    @staticmethod
+    def global_tag_ability_decision(user: Optional[Any], ability: str):
+        normalized = str(ability or "").strip()
+        action = TagService.TAG_GLOBAL_POLICY_ABILITIES.get(normalized)
+        if not action:
+            return None
+
+        settings = get_extension_settings("tags")
+        min_primary = TagService._settings_int(settings, "min_primary_tags")
+        min_secondary = TagService._settings_int(settings, "min_secondary_tags")
+
+        if normalized == "startDiscussion":
+            if has_runtime_forum_permission(user, "startDiscussion") and has_runtime_forum_permission(user, "bypassTagCounts"):
+                return True
+            if min_primary == 0 and min_secondary == 0:
+                return None
+
+        counts = TagService._global_policy_allowed_tag_counts(user, action)
+        primary_required = min_primary
+        secondary_required = min_secondary
+        if normalized == "viewForum":
+            primary_required = min(counts["total_primary"], min_primary)
+            secondary_required = min(counts["total_secondary"], min_secondary)
+
+        return counts["allowed_primary"] >= primary_required and counts["allowed_secondary"] >= secondary_required
+
+    @staticmethod
+    def _global_policy_allowed_tag_counts(user: Optional[Any], action: str) -> dict[str, int]:
+        cache_owner = user if user is not None else TagService
+        cache = getattr(cache_owner, "_tag_global_policy_counts_cache", None)
+        if cache is None:
+            cache = {}
+            try:
+                setattr(cache_owner, "_tag_global_policy_counts_cache", cache)
+            except Exception:
+                cache = {}
+        cache_key = (
+            action,
+            getattr(user, "id", None),
+            bool(getattr(user, "is_authenticated", False)),
+            bool(getattr(user, "is_staff", False)),
+            bool(getattr(user, "is_superuser", False)),
+        )
+        if cache_key in cache:
+            return dict(cache[cache_key])
+
+        allowed = TagService.filter_tags_for_user(Tag.objects.all(), user, action=action)
+        counts = {
+            "allowed_primary": allowed.filter(position__isnull=False, parent_id__isnull=True).count(),
+            "allowed_secondary": allowed.filter(parent_id__isnull=False).count(),
+            "total_primary": Tag.objects.filter(position__isnull=False, parent_id__isnull=True).count(),
+            "total_secondary": Tag.objects.filter(parent_id__isnull=False).count(),
+        }
+        cache[cache_key] = counts
+        return dict(counts)
 
     @staticmethod
     def filter_tags_for_user(queryset: QuerySet, user: Optional[Any], action: str = "view") -> QuerySet:
