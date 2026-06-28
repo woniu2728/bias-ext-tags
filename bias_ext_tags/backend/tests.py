@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 
 from django.core.management import call_command
@@ -1193,6 +1194,74 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
         sql = " ".join(query["sql"].lower() for query in queries)
         self.assertIn(" in (select", sql)
         self.assertNotIn('from "tags" where "tags"."is_restricted"', sql)
+
+    def test_discussion_list_does_not_re_enumerate_tags_for_permission_scopes(self):
+        tags = [
+            Tag.objects.create(
+                name=f"Query Scope Tag {index}",
+                slug=f"query-scope-tag-{index}",
+                is_restricted=True,
+            )
+            for index in range(1, 13)
+        ]
+        groups = [
+            Group.objects.create(name=f"QueryScopeGroup{index}", color="#4d698e")
+            for index in range(1, 5)
+        ]
+        for index, group in enumerate(groups):
+            Permission.objects.create(group=group, permission=f"tag{tags[index].id}.viewForum")
+            Permission.objects.create(group=group, permission="startDiscussion")
+            Permission.objects.create(group=group, permission="startDiscussionWithoutApproval")
+            for tag in tags:
+                Permission.objects.create(group=group, permission=f"tag{tag.id}.startDiscussion")
+
+        reader_group = groups[0]
+        Permission.objects.create(group=reader_group, permission="viewForum")
+        self.reader.user_groups.add(reader_group)
+
+        for index in range(10):
+            author = User.objects.create_user(
+                username=f"query-scope-author-{index}",
+                email=f"query-scope-author-{index}@example.com",
+                password="password123",
+                is_email_confirmed=True,
+            )
+            for group in (groups[index % len(groups)], groups[(index + 1) % len(groups)]):
+                author.user_groups.add(group)
+            create_runtime_discussion(
+                title=f"Permission scope discussion {index}",
+                content="Exercise discussion list permission scopes.",
+                user=author,
+                extension_payload=discussion_tags_payload([tags[index % len(tags)].id]),
+            )
+
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get("/api/discussions/", **self.auth_header(self.reader))
+
+        self.assertEqual(response.status_code, 200, response.content)
+
+        tag_enumerations = [
+            query["sql"]
+            for query in queries
+            if re.match(r'^select\s+.*\s+from\s+["`]?tags["`]?(?:\s|$)', query["sql"].lower())
+            and not re.search(r'where\s+.*["`]?id["`]?\s*(=|in\b)', query["sql"].lower())
+        ]
+        regression_shape_queries = [
+            sql
+            for sql in tag_enumerations
+            if re.match(
+                r'^select\s+(?:(?:"id"|"tags"\."id"|`id`|`tags`\.`id`)\s*,\s*'
+                r'(?:"is_restricted"|"tags"\."is_restricted"|`is_restricted`|`tags`\.`is_restricted`)|\*)'
+                r'\s+from\s+["`]?tags["`]?\s*$',
+                sql.lower(),
+            )
+        ]
+
+        self.assertLessEqual(
+            len(regression_shape_queries),
+            1,
+            "Discussion list should not repeatedly enumerate the tags table while resolving permission scopes.",
+        )
 
     def test_cannot_create_discussion_in_staff_only_tag(self):
         restricted_tag = Tag.objects.create(
