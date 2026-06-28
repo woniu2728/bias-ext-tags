@@ -452,17 +452,21 @@ class TagStatsTests(TestCase):
         self.tag.refresh_from_db()
         initial_last_posted_at = self.tag.last_posted_at
 
-        with self.captureOnCommitCallbacks(execute=True):
-            create_runtime_post(
-                discussion_id=discussion.id,
-                content="新的回复",
-                user=self.user,
-            )
+        with patch("bias_ext_tags.backend.services.TagService.refresh_tag_stats") as refresh_tag_stats:
+            with patch("bias_ext_tags.backend.listeners.refresh_runtime_discussion_tag_stats") as refresh_discussion_tag_stats:
+                with self.captureOnCommitCallbacks(execute=True):
+                    create_runtime_post(
+                        discussion_id=discussion.id,
+                        content="新的回复",
+                        user=self.user,
+                    )
 
         self.tag.refresh_from_db()
         self.assertIsNotNone(initial_last_posted_at)
         self.assertGreater(self.tag.last_posted_at, initial_last_posted_at)
         self.assertEqual(self.tag.last_posted_discussion_id, discussion.id)
+        refresh_tag_stats.assert_not_called()
+        refresh_discussion_tag_stats.assert_not_called()
 
 
 class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):

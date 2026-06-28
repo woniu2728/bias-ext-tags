@@ -126,10 +126,7 @@ def handle_discussion_tagged(event: DiscussionTaggedEvent) -> None:
 
 
 def handle_post_created_tag_stats(event) -> None:
-    if not event.is_approved:
-        return
-
-    refresh_runtime_discussion_tag_stats(event.discussion_id)
+    return None
 
 
 def handle_post_approved_tag_stats(event) -> None:

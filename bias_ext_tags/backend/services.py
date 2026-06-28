@@ -964,6 +964,22 @@ class TagService:
             discussion_count=F("discussion_count") + 1,
         )
 
+        return TagService.update_tag_latest_discussion(discussion, normalized_tag_ids)
+
+    @staticmethod
+    def update_tag_latest_discussion(discussion, tag_ids: List[int] | tuple[int, ...]) -> int:
+        normalized_tag_ids = sorted({int(tag_id) for tag_id in (tag_ids or []) if tag_id})
+        if not normalized_tag_ids:
+            return 0
+        if getattr(discussion, "hidden_at", None) is not None:
+            return 0
+        approval_status = getattr(discussion, "approval_status", "")
+        approved_status = getattr(discussion.__class__, "APPROVAL_APPROVED", "approved")
+        if approval_status != approved_status:
+            return 0
+        if getattr(discussion, "is_private", False):
+            return 0
+
         latest_candidate = Q(last_posted_at__isnull=True)
         if getattr(discussion, "last_posted_at", None) is not None:
             latest_candidate |= Q(last_posted_at__lte=discussion.last_posted_at)
