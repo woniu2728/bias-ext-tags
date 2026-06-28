@@ -842,6 +842,81 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         slugs = {tag["slug"] for tag in response.json()["data"]}
         self.assertEqual(slugs, {"public-tag", "members-tag"})
 
+    def test_public_tag_payload_hides_admin_only_access_fields(self):
+        tag = Tag.objects.create(
+            name="受限可见",
+            slug="restricted-visible",
+            is_restricted=True,
+            view_scope=Tag.ACCESS_PUBLIC,
+            start_discussion_scope=Tag.ACCESS_MEMBERS,
+            reply_scope=Tag.ACCESS_MEMBERS,
+        )
+        group = Group.objects.create(name="RestrictedVisible", color="#4d698e")
+        Permission.objects.create(group=group, permission=f"tag{tag.id}.viewForum")
+        self.member.user_groups.add(group)
+
+        response = self.client.get(
+            f"/api/tags/{tag.id}",
+            **self.auth_header(self.member),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertNotIn("is_restricted", payload)
+        self.assertNotIn("view_scope", payload)
+        self.assertNotIn("start_discussion_scope", payload)
+        self.assertNotIn("reply_scope", payload)
+
+    def test_admin_tag_payload_includes_access_fields(self):
+        tag = Tag.objects.create(
+            name="后台可见",
+            slug="admin-visible",
+            is_restricted=True,
+            view_scope=Tag.ACCESS_PUBLIC,
+            start_discussion_scope=Tag.ACCESS_MEMBERS,
+            reply_scope=Tag.ACCESS_STAFF,
+        )
+
+        response = self.client.get(
+            f"/api/tags/{tag.id}",
+            **self.auth_header(self.admin),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertTrue(payload["is_restricted"])
+        self.assertEqual(payload["view_scope"], Tag.ACCESS_PUBLIC)
+        self.assertEqual(payload["start_discussion_scope"], Tag.ACCESS_MEMBERS)
+        self.assertEqual(payload["reply_scope"], Tag.ACCESS_STAFF)
+
+    def test_public_tag_children_hide_admin_only_access_fields(self):
+        child = Tag.objects.create(
+            name="公开子标签",
+            slug="public-child-access",
+            parent=self.public_tag,
+            is_restricted=True,
+            view_scope=Tag.ACCESS_PUBLIC,
+            start_discussion_scope=Tag.ACCESS_MEMBERS,
+            reply_scope=Tag.ACCESS_MEMBERS,
+        )
+        group = Group.objects.create(name="RestrictedChildVisible", color="#4d698e")
+        Permission.objects.create(group=group, permission=f"tag{child.id}.viewForum")
+        self.member.user_groups.add(group)
+
+        response = self.client.get(
+            "/api/tags",
+            {"include_children": True},
+            **self.auth_header(self.member),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        parent_payload = next(item for item in response.json()["data"] if item["slug"] == self.public_tag.slug)
+        child_payload = next(item for item in parent_payload["children"] if item["id"] == child.id)
+        self.assertNotIn("is_restricted", child_payload)
+        self.assertNotIn("view_scope", child_payload)
+        self.assertNotIn("start_discussion_scope", child_payload)
+        self.assertNotIn("reply_scope", child_payload)
+
     def test_tag_detail_exposes_registered_resource_fields(self):
         with self.captureOnCommitCallbacks(execute=True):
             discussion = create_runtime_discussion(

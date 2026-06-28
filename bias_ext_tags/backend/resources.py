@@ -244,19 +244,31 @@ def serialize_tag_base(tag, context: dict) -> dict:
         "position": tag.position,
         "parent_id": tag.parent_id,
         "is_hidden": tag.is_hidden,
-        "is_restricted": tag.is_restricted,
-        "view_scope": tag.view_scope,
-        "start_discussion_scope": tag.start_discussion_scope,
-        "reply_scope": tag.reply_scope,
         "discussion_count": tag.discussion_count,
         "last_posted_at": tag.last_posted_at,
         "created_at": tag.created_at,
         "updated_at": tag.updated_at,
     }
+    if can_view_tag_admin_fields(context):
+        payload.update({
+            "is_restricted": tag.is_restricted,
+            "view_scope": tag.view_scope,
+            "start_discussion_scope": tag.start_discussion_scope,
+            "reply_scope": tag.reply_scope,
+        })
     state = resolve_tag_state(tag, context)
     if state is not None:
         payload["state"] = state
     return payload
+
+
+def can_view_tag_admin_fields(context: dict) -> bool:
+    user = context.get("user")
+    return bool(
+        user
+        and getattr(user, "is_authenticated", False)
+        and (getattr(user, "is_staff", False) or getattr(user, "is_superuser", False))
+    )
 
 
 def resolve_tag_state(tag, context: dict) -> dict | None:
