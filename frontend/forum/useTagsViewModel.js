@@ -37,6 +37,7 @@ export function useTagsViewModel({
   const viewBindings = useTagsViewBindings({
     authStore,
     cloudTags: pageState.cloudTags,
+    childTags: pageState.childTags,
     emptyStateText: metaState.emptyStateText,
     handleStartDiscussion,
     heroDescriptionText: metaState.heroDescriptionText,
@@ -44,6 +45,8 @@ export function useTagsViewModel({
     loading: pageState.loading,
     loadingStateText: metaState.loadingStateText,
     showStartDiscussionButton,
+    primaryTags: pageState.primaryTags,
+    secondaryTags: pageState.secondaryTags,
     tags: pageState.tags,
   })
 

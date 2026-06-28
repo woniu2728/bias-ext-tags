@@ -1,6 +1,6 @@
 import { ref, computed } from '@bias/core'
 import { getTrackedDiscussionIdsFromDiscussionItems } from '@bias/realtime'
-import { flattenTags, normalizeTag, unwrapTagList } from './tagUtils.js'
+import { groupTagsByStructure, normalizeTag, unwrapTagList } from './tagUtils.js'
 
 export function createTagsResourceState({
   resourceStore,
@@ -8,6 +8,10 @@ export function createTagsResourceState({
   const tagIds = ref([])
 
   const tags = computed(() => resourceStore.list('tags', tagIds.value))
+  const tagGroups = computed(() => groupTagsByStructure(tags.value))
+  const primaryTags = computed(() => tagGroups.value.primaryTags)
+  const secondaryTags = computed(() => tagGroups.value.secondaryTags)
+  const childTags = computed(() => tagGroups.value.childTags)
   const trackedDiscussionIds = computed(() => {
     return getTrackedDiscussionIdsFromDiscussionItems(
       tags.value
@@ -15,7 +19,7 @@ export function createTagsResourceState({
         .filter(Boolean)
     )
   })
-  const cloudTags = computed(() => flattenTags(tags.value.filter(tag => tag.children.length === 0)).slice(0, 12))
+  const cloudTags = computed(() => secondaryTags.value.slice(0, 12))
 
   function applyTagsResponse(response) {
     tagIds.value = resourceStore.upsertMany('tags', unwrapTagList(response).map(normalizeTag))
@@ -29,9 +33,13 @@ export function createTagsResourceState({
   return {
     applyTagsResponse,
     cloudTags,
+    childTags,
+    primaryTags,
     resetTags,
+    secondaryTags,
     tagIds,
     tags,
+    tagGroups,
     trackedDiscussionIds,
   }
 }

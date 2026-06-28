@@ -51,8 +51,11 @@ export function useTagsPage() {
   })
 
   return {
+    childTags: resourceState.childTags,
     cloudTags: resourceState.cloudTags,
     loading: loadState.listState.loading,
+    primaryTags: resourceState.primaryTags,
+    secondaryTags: resourceState.secondaryTags,
     tags: resourceState.tags,
   }
 }

@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  groupTagsByStructure,
   isChildTag,
   isPrimaryRootTag,
   isSecondaryRootTag,
@@ -28,4 +29,19 @@ test('tag structure sorting keeps positioned tags before nullable tags', () => {
   ].sort(sortTagsByStructure)
 
   assert.deepEqual(tags.map(tag => tag.name), ['主一', '主二', '次级'])
+})
+
+test('tag structure grouping separates primary, secondary roots and children', () => {
+  const grouped = groupTagsByStructure([
+    { id: 1, name: '主二', is_primary: true, parent_id: null, position: 2 },
+    { id: 2, name: '主一', is_primary: true, parent_id: null, position: 1 },
+    { id: 3, name: '子', is_primary: true, parent_id: 2, position: 0 },
+    { id: 4, name: '次级乙', is_primary: false, parent_id: null, position: null },
+    { id: 5, name: '次级甲', is_primary: false, parent_id: null, position: null },
+  ])
+
+  assert.deepEqual(grouped.primaryTags.map(tag => tag.id), [2, 1])
+  assert.deepEqual(grouped.primaryTags[0].children.map(tag => tag.id), [3])
+  assert.deepEqual(grouped.secondaryTags.map(tag => tag.id), [5, 4])
+  assert.deepEqual(grouped.childTags.map(tag => tag.id), [3])
 })

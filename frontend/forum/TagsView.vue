@@ -19,15 +19,20 @@
         <ForumStateBlock v-else-if="contentBindings.tags.length === 0">{{ contentBindings.emptyStateText }}</ForumStateBlock>
 
         <template v-else>
-          <div class="tag-grid">
-            <TagTile
-              v-for="tag in contentBindings.tags"
-              :key="tag.id"
-              :tag="tag"
-            />
-          </div>
+          <section v-if="contentBindings.primaryTags.length" class="tags-section">
+            <div class="tag-grid">
+              <TagTile
+                v-for="tag in contentBindings.primaryTags"
+                :key="tag.id"
+                :tag="tag"
+              />
+            </div>
+          </section>
 
-          <TagCloud v-if="contentBindings.cloudTags.length" :tags="contentBindings.cloudTags" />
+          <section v-if="contentBindings.secondaryTags.length" class="tags-section tags-section--secondary">
+            <h2 class="tags-section-title">更多标签</h2>
+            <TagCloud :tags="contentBindings.secondaryTags" />
+          </section>
         </template>
       </main>
     </ForumPageWithSidebar>
@@ -81,5 +86,16 @@ const {
 .tag-grid {
   display: grid;
   gap: 18px;
+}
+
+.tags-section + .tags-section {
+  margin-top: 28px;
+}
+
+.tags-section-title {
+  margin: 0 0 14px;
+  color: var(--forum-text-color);
+  font-size: 18px;
+  font-weight: 600;
 }
 </style>

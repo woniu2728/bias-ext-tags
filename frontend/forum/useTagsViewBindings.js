@@ -3,6 +3,7 @@ import { computed } from '@bias/core'
 
 export function createTagsViewBindings({
   authStore,
+  childTags = { value: [] },
   cloudTags,
   emptyStateText,
   handleStartDiscussion,
@@ -11,6 +12,8 @@ export function createTagsViewBindings({
   loading,
   loadingStateText,
   showStartDiscussionButton,
+  primaryTags = { value: [] },
+  secondaryTags = { value: [] },
   tags,
 }) {
   const sidebarBindings = computed(() => ({
@@ -29,10 +32,13 @@ export function createTagsViewBindings({
   }))
 
   const contentBindings = computed(() => ({
+    childTags: childTags.value,
     cloudTags: cloudTags.value,
     emptyStateText: emptyStateText.value,
     loading: loading.value,
     loadingStateText: loadingStateText.value,
+    primaryTags: primaryTags.value,
+    secondaryTags: secondaryTags.value,
     tags: tags.value,
   }))
 

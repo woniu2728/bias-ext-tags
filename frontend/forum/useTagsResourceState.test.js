@@ -28,13 +28,16 @@ test('tags resource state maps response into resource-backed tags and cloud tags
   })
 
   state.applyTagsResponse([
-    { id: 1, name: '公告', children: [], last_posted_discussion: { id: 7 } },
-    { id: 2, name: '帮助', children: [], last_posted_discussion: { id: 9 } },
+    { id: 1, name: '公告', is_primary: true, position: 0, children: [{ id: 3, name: '公告子类', is_primary: true, parent_id: 1, position: 0 }], last_posted_discussion: { id: 7 } },
+    { id: 2, name: '帮助', is_primary: false, position: null, children: [], last_posted_discussion: { id: 9 } },
   ])
 
   assert.deepEqual(state.tagIds.value, [1, 2])
   assert.equal(state.tags.value.length, 2)
-  assert.deepEqual(state.cloudTags.value.map(tag => tag.id), [1, 2])
+  assert.deepEqual(state.primaryTags.value.map(tag => tag.id), [1])
+  assert.deepEqual(state.secondaryTags.value.map(tag => tag.id), [2])
+  assert.deepEqual(state.childTags.value.map(tag => tag.id), [3])
+  assert.deepEqual(state.cloudTags.value.map(tag => tag.id), [2])
   assert.deepEqual(state.trackedDiscussionIds.value, [7, 9])
 })
 

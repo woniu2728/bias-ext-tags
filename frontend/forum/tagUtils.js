@@ -46,3 +46,36 @@ export function sortTagsByStructure(left = {}, right = {}) {
   if (leftPosition !== rightPosition) return leftPosition - rightPosition
   return String(left.name || '').localeCompare(String(right.name || ''), 'zh-CN')
 }
+
+export function groupTagsByStructure(tags = []) {
+  const normalized = flattenTags(tags)
+  const byId = new Map(normalized.map(tag => [tag.id, { ...tag, children: [] }]))
+
+  for (const tag of normalized) {
+    if (!isChildTag(tag)) continue
+    const parent = byId.get(tag.parent_id)
+    if (parent) {
+      parent.children.push(byId.get(tag.id) || tag)
+    }
+  }
+
+  const primaryTags = Array.from(byId.values())
+    .filter(isPrimaryRootTag)
+    .sort(sortTagsByStructure)
+    .map(tag => ({
+      ...tag,
+      children: tag.children.slice().sort(sortTagsByStructure),
+    }))
+  const secondaryTags = Array.from(byId.values())
+    .filter(isSecondaryRootTag)
+    .sort((left, right) => String(left.name || '').localeCompare(String(right.name || ''), 'zh-CN'))
+  const childTags = Array.from(byId.values())
+    .filter(isChildTag)
+    .sort(sortTagsByStructure)
+
+  return {
+    childTags,
+    primaryTags,
+    secondaryTags,
+  }
+}

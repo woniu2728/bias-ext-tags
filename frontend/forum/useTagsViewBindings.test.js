@@ -7,6 +7,7 @@ import { createTagsViewBindings } from './useTagsViewBindings.js'
 test('tags view bindings expose sidebar, hero and content props', () => {
   const bindings = createTagsViewBindings({
     authStore: { isAuthenticated: true },
+    childTags: ref([{ id: 3 }]),
     cloudTags: ref([{ id: 2 }]),
     emptyStateText: ref('暂无标签'),
     handleStartDiscussion() {},
@@ -14,6 +15,8 @@ test('tags view bindings expose sidebar, hero and content props', () => {
     heroTitleText: ref('全部标签'),
     loading: ref(false),
     loadingStateText: ref('加载中...'),
+    primaryTags: ref([{ id: 1 }]),
+    secondaryTags: ref([{ id: 2 }]),
     showStartDiscussionButton: ref(true),
     tags: ref([{ id: 1 }]),
   })
@@ -29,9 +32,12 @@ test('tags view bindings expose sidebar, hero and content props', () => {
   })
   assert.deepEqual(bindings.contentBindings.value, {
     cloudTags: [{ id: 2 }],
+    childTags: [{ id: 3 }],
     emptyStateText: '暂无标签',
     loading: false,
     loadingStateText: '加载中...',
+    primaryTags: [{ id: 1 }],
+    secondaryTags: [{ id: 2 }],
     tags: [{ id: 1 }],
   })
 })
