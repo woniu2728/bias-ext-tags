@@ -33,7 +33,7 @@ def serialize_admin_tag(tag: Tag):
         "color": tag.color or "#888",
         "icon": tag.icon,
         "position": tag.position,
-        "is_primary": TagService.is_primary_tag(tag),
+        "is_primary": TagService.is_primary_tree_tag(tag),
         "parent_id": tag.parent_id,
         "parent_name": tag.parent.name if tag.parent else None,
         "discussion_count": tag.discussion_count,

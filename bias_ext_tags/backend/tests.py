@@ -1396,7 +1396,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         child_payload = child_response.json()
         self.assertTrue(parent_payload["is_primary"])
         self.assertFalse(parent_payload["is_child"])
-        self.assertFalse(child_payload["is_primary"])
+        self.assertTrue(child_payload["is_primary"])
         self.assertTrue(child_payload["is_child"])
 
     def test_tag_structure_flags_use_central_primary_and_child_helpers(self):
@@ -1415,6 +1415,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertTrue(TagService.is_primary_tag(self.public_tag))
         self.assertFalse(TagService.is_child_tag(self.public_tag))
         self.assertFalse(TagService.is_primary_tag(child))
+        self.assertTrue(TagService.is_primary_tree_tag(child))
         self.assertTrue(TagService.is_child_tag(child))
         self.assertFalse(TagService.is_primary_tag(secondary))
         self.assertFalse(TagService.is_child_tag(secondary))

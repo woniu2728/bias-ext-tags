@@ -269,7 +269,7 @@ def serialize_tag_base(tag, context: dict) -> dict:
         "position": tag.position,
         "parent_id": tag.parent_id,
         "is_hidden": tag.is_hidden,
-        "is_primary": TagService.is_primary_tag(tag),
+        "is_primary": TagService.is_primary_tree_tag(tag),
         "is_child": TagService.is_child_tag(tag),
         "discussion_count": tag.discussion_count,
         "last_posted_at": tag.last_posted_at,

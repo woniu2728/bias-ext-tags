@@ -80,7 +80,15 @@ class TagService:
 
     @staticmethod
     def is_primary_tag(tag: Optional[Tag]) -> bool:
+        return TagService.is_primary_root_tag(tag)
+
+    @staticmethod
+    def is_primary_root_tag(tag: Optional[Tag]) -> bool:
         return bool(tag and tag.parent_id is None and tag.is_primary)
+
+    @staticmethod
+    def is_primary_tree_tag(tag: Optional[Tag]) -> bool:
+        return bool(tag and tag.is_primary)
 
     @staticmethod
     def is_child_tag(tag: Optional[Tag]) -> bool:
