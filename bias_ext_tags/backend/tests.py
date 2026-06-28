@@ -229,25 +229,30 @@ class TagStatsTests(TestCase):
         )
 
     def test_create_discussion_refreshes_tag_count(self):
-        with self.captureOnCommitCallbacks(execute=True):
-            create_runtime_discussion(
-                title="生活讨论 1",
-                content="第一条生活内容",
-                user=self.user,
-                extension_payload=discussion_tags_payload([self.tag.id]),
-            )
-        with self.captureOnCommitCallbacks(execute=True):
-            create_runtime_discussion(
-                title="生活讨论 2",
-                content="第二条生活内容",
-                user=self.user,
-                extension_payload=discussion_tags_payload([self.tag.id]),
-            )
+        events, dispatch_patch = capture_runtime_events()
+        with patch("bias_ext_tags.backend.services.TagService.refresh_tag_stats") as refresh_tag_stats:
+            with dispatch_patch:
+                with self.captureOnCommitCallbacks(execute=True):
+                    create_runtime_discussion(
+                        title="生活讨论 1",
+                        content="第一条生活内容",
+                        user=self.user,
+                        extension_payload=discussion_tags_payload([self.tag.id]),
+                    )
+                with self.captureOnCommitCallbacks(execute=True):
+                    create_runtime_discussion(
+                        title="生活讨论 2",
+                        content="第二条生活内容",
+                        user=self.user,
+                        extension_payload=discussion_tags_payload([self.tag.id]),
+                    )
 
         self.tag.refresh_from_db()
 
         self.assertEqual(self.tag.discussion_count, 2)
         self.assertIsNotNone(self.tag.last_posted_discussion)
+        refresh_tag_stats.assert_not_called()
+        self.assertFalse(any(isinstance(event, TagStatsRefreshRequestedEvent) for event in events))
 
     def test_refresh_tag_stats_repairs_existing_discussion_count(self):
         discussion = create_runtime_discussion(

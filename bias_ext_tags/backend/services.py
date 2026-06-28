@@ -940,6 +940,42 @@ class TagService:
             TagService.dispatch_refresh_tag_stats(tag_ids)
 
     @staticmethod
+    def increment_tag_stats_for_discussion(discussion, tag_ids: List[int] | tuple[int, ...]) -> int:
+        """
+        Increment tag metadata for a newly counted discussion.
+
+        Creation can update affected tag counters directly. Moderation and tag
+        changes that may invalidate an existing latest discussion still use
+        refresh_tag_stats.
+        """
+        normalized_tag_ids = sorted({int(tag_id) for tag_id in (tag_ids or []) if tag_id})
+        if not normalized_tag_ids:
+            return 0
+        if getattr(discussion, "hidden_at", None) is not None:
+            return 0
+        approval_status = getattr(discussion, "approval_status", "")
+        approved_status = getattr(discussion.__class__, "APPROVAL_APPROVED", "approved")
+        if approval_status != approved_status:
+            return 0
+        if getattr(discussion, "is_private", False):
+            return 0
+
+        Tag.objects.filter(id__in=normalized_tag_ids).update(
+            discussion_count=F("discussion_count") + 1,
+        )
+
+        latest_candidate = Q(last_posted_at__isnull=True)
+        if getattr(discussion, "last_posted_at", None) is not None:
+            latest_candidate |= Q(last_posted_at__lte=discussion.last_posted_at)
+
+        return Tag.objects.filter(
+            Q(id__in=normalized_tag_ids) & latest_candidate
+        ).update(
+            last_posted_at=discussion.last_posted_at,
+            last_posted_discussion_id=discussion.id,
+        )
+
+    @staticmethod
     def dispatch_refresh_tag_stats(tag_ids: Optional[List[int]] = None) -> dict:
         normalized_tag_ids = None
         if tag_ids is not None:

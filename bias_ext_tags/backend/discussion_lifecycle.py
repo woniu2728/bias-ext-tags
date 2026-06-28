@@ -6,11 +6,25 @@ from bias_ext_tags.backend.events import (
     TagStatsRefreshRequestedEvent,
 )
 from bias_ext_tags.backend.tag_relationships import get_discussion_tag_ids
+from bias_ext_tags.backend.services import TagService
 
 
 def prepare_discussion_delete(*, discussion, user, context: dict | None = None, **kwargs) -> dict:
     return {
         "tag_ids": get_discussion_tag_ids(discussion),
+    }
+
+
+def apply_discussion_create(*, discussion, state: dict | None = None, context: dict | None = None, **kwargs) -> dict:
+    if not (context or {}).get("is_counted"):
+        return {}
+    tag_ids = get_discussion_tag_ids(discussion)
+    if not tag_ids:
+        return {}
+    TagService.increment_tag_stats_for_discussion(discussion, tag_ids)
+    return {
+        "discussion_id": discussion.id,
+        "affected_tag_ids": tag_ids,
     }
 
 

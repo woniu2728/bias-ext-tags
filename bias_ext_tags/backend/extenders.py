@@ -23,6 +23,7 @@ from bias_ext_tags.backend.admin_api import router as admin_tags_router
 from bias_ext_tags.backend.admin_surface import admin_page_definitions, permission_definitions
 from bias_ext_tags.backend.console import refresh_tag_stats_console_command
 from bias_ext_tags.backend.discussion_lifecycle import (
+    apply_discussion_create,
     apply_discussion_approved,
     apply_discussion_delete,
     apply_discussion_hidden,
@@ -187,6 +188,7 @@ def event_extenders():
         ),
         DiscussionLifecycleExtender().handler(
             "tags",
+            apply_create=apply_discussion_create,
             prepare_delete=prepare_discussion_delete,
             apply_delete=apply_discussion_delete,
             apply_hidden=apply_discussion_hidden,

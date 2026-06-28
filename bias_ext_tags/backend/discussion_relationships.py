@@ -44,7 +44,7 @@ def set_discussion_tags_relationship(discussion, value, context: dict | None = N
                 )
             )
 
-    if affected_tag_ids:
+    if affected_tag_ids and not context.get("creating"):
         dispatch_forum_event_after_commit(
             TagStatsRefreshRequestedEvent(tag_ids=affected_tag_ids)
         )
