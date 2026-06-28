@@ -976,6 +976,33 @@ class TagService:
         )
 
     @staticmethod
+    def adjust_tag_stats_for_discussion_visibility(
+        discussion,
+        tag_ids: List[int] | tuple[int, ...],
+        *,
+        is_hidden: bool,
+    ) -> None:
+        normalized_tag_ids = sorted({int(tag_id) for tag_id in (tag_ids or []) if tag_id})
+        if not normalized_tag_ids:
+            return
+
+        if not is_hidden:
+            TagService.increment_tag_stats_for_discussion(discussion, normalized_tag_ids)
+            return
+
+        Tag.objects.filter(id__in=normalized_tag_ids).update(
+            discussion_count=F("discussion_count") - 1,
+        )
+        latest_tag_ids = list(
+            Tag.objects.filter(
+                id__in=normalized_tag_ids,
+                last_posted_discussion_id=discussion.id,
+            ).values_list("id", flat=True)
+        )
+        if latest_tag_ids:
+            TagService.refresh_tag_stats(latest_tag_ids)
+
+    @staticmethod
     def dispatch_refresh_tag_stats(tag_ids: Optional[List[int]] = None) -> dict:
         normalized_tag_ids = None
         if tag_ids is not None:

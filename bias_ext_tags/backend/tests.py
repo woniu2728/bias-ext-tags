@@ -372,6 +372,64 @@ class TagStatsTests(TestCase):
         self.assertEqual(self.tag.discussion_count, 1)
         self.assertEqual(self.tag.last_posted_discussion_id, discussion.id)
 
+    def test_hiding_non_latest_discussion_updates_tag_count_without_refresh(self):
+        admin = User.objects.create_superuser(
+            username="tag-hide-admin",
+            email="tag-hide-admin@example.com",
+            password="password123",
+        )
+        with self.captureOnCommitCallbacks(execute=True):
+            older_discussion = create_runtime_discussion(
+                title="较早标签讨论",
+                content="较早内容",
+                user=self.user,
+                extension_payload=discussion_tags_payload([self.tag.id]),
+            )
+        with self.captureOnCommitCallbacks(execute=True):
+            newer_discussion = create_runtime_discussion(
+                title="较新标签讨论",
+                content="较新内容",
+                user=self.user,
+                extension_payload=discussion_tags_payload([self.tag.id]),
+            )
+
+        with patch("bias_ext_tags.backend.services.TagService.refresh_tag_stats") as refresh_tag_stats:
+            with self.captureOnCommitCallbacks(execute=True):
+                set_runtime_discussion_hidden_state(older_discussion, admin, True)
+
+        self.tag.refresh_from_db()
+        self.assertEqual(self.tag.discussion_count, 1)
+        self.assertEqual(self.tag.last_posted_discussion_id, newer_discussion.id)
+        refresh_tag_stats.assert_not_called()
+
+    def test_hiding_latest_discussion_refreshes_tag_latest_discussion(self):
+        admin = User.objects.create_superuser(
+            username="tag-hide-latest-admin",
+            email="tag-hide-latest-admin@example.com",
+            password="password123",
+        )
+        with self.captureOnCommitCallbacks(execute=True):
+            older_discussion = create_runtime_discussion(
+                title="较早 latest 标签讨论",
+                content="较早内容",
+                user=self.user,
+                extension_payload=discussion_tags_payload([self.tag.id]),
+            )
+        with self.captureOnCommitCallbacks(execute=True):
+            newer_discussion = create_runtime_discussion(
+                title="较新 latest 标签讨论",
+                content="较新内容",
+                user=self.user,
+                extension_payload=discussion_tags_payload([self.tag.id]),
+            )
+
+        with self.captureOnCommitCallbacks(execute=True):
+            set_runtime_discussion_hidden_state(newer_discussion, admin, True)
+
+        self.tag.refresh_from_db()
+        self.assertEqual(self.tag.discussion_count, 1)
+        self.assertEqual(self.tag.last_posted_discussion_id, older_discussion.id)
+
     def test_create_tag_generates_slug_when_missing(self):
         admin = User.objects.create_superuser(
             username="tag-admin-2",
