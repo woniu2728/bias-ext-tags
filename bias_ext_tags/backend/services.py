@@ -1029,6 +1029,35 @@ class TagService:
             TagService.increment_tag_stats_for_discussion(discussion, added_ids)
 
     @staticmethod
+    def tag_ids_where_discussion_is_latest(discussion, tag_ids: List[int] | tuple[int, ...]) -> tuple[int, ...]:
+        normalized_tag_ids = sorted({int(tag_id) for tag_id in (tag_ids or []) if tag_id})
+        if not normalized_tag_ids:
+            return ()
+        return tuple(
+            Tag.objects.filter(
+                id__in=normalized_tag_ids,
+                last_posted_discussion_id=getattr(discussion, "id", discussion),
+            ).values_list("id", flat=True)
+        )
+
+    @staticmethod
+    def adjust_tag_stats_for_deleted_discussion(
+        tag_ids: List[int] | tuple[int, ...],
+        *,
+        latest_tag_ids: List[int] | tuple[int, ...] = (),
+    ) -> None:
+        normalized_tag_ids = sorted({int(tag_id) for tag_id in (tag_ids or []) if tag_id})
+        if not normalized_tag_ids:
+            return
+
+        Tag.objects.filter(id__in=normalized_tag_ids).update(
+            discussion_count=F("discussion_count") - 1,
+        )
+        latest_ids = sorted({int(tag_id) for tag_id in (latest_tag_ids or []) if tag_id})
+        if latest_ids:
+            TagService.refresh_tag_stats(latest_ids)
+
+    @staticmethod
     def dispatch_refresh_tag_stats(tag_ids: Optional[List[int]] = None) -> dict:
         normalized_tag_ids = None
         if tag_ids is not None:

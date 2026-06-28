@@ -10,8 +10,12 @@ from bias_ext_tags.backend.services import TagService
 
 
 def prepare_discussion_delete(*, discussion, user, context: dict | None = None, **kwargs) -> dict:
+    tag_ids = get_discussion_tag_ids(discussion)
     return {
-        "tag_ids": get_discussion_tag_ids(discussion),
+        "tag_ids": tag_ids,
+        "last_posted_discussion_tag_ids": tuple(
+            TagService.tag_ids_where_discussion_is_latest(discussion, tag_ids)
+        ),
     }
 
 
@@ -53,9 +57,10 @@ def apply_discussion_update(*, discussion, state: dict | None = None, context: d
 
 def apply_discussion_delete(*, state: dict | None = None, context: dict | None = None, **kwargs) -> dict:
     tag_ids = tuple((state or {}).get("tag_ids") or ())
-    if tag_ids:
-        dispatch_forum_event_after_commit(
-            TagStatsRefreshRequestedEvent(tag_ids=tag_ids)
+    if tag_ids and (context or {}).get("was_counted"):
+        TagService.adjust_tag_stats_for_deleted_discussion(
+            tag_ids,
+            latest_tag_ids=tuple((state or {}).get("last_posted_discussion_tag_ids") or ()),
         )
     return {
         "affected_tag_ids": tag_ids,

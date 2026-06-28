@@ -1741,7 +1741,7 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
 
         self.assertEqual(allowed_response.status_code, 200, allowed_response.content)
 
-    def test_delete_discussion_dispatches_tag_refresh_through_extension_lifecycle(self):
+    def test_delete_non_latest_discussion_adjusts_tag_count_without_refresh(self):
         admin = User.objects.create_superuser(
             username="discussion-delete-tag-admin",
             email="discussion-delete-tag-admin@example.com",
@@ -1754,16 +1754,51 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
             user=admin,
             extension_payload=discussion_tags_payload([tag.id]),
         )
+        newer_discussion = create_runtime_discussion(
+            title="Newer delete tagged discussion",
+            content="Keeps latest after deleting older discussion",
+            user=admin,
+            extension_payload=discussion_tags_payload([tag.id]),
+        )
 
         events, dispatch_patch = capture_runtime_events()
-        with dispatch_patch:
-            with self.captureOnCommitCallbacks(execute=True):
-                delete_runtime_discussion(discussion.id, admin)
+        with patch("bias_ext_tags.backend.services.TagService.refresh_tag_stats") as refresh_tag_stats:
+            with dispatch_patch:
+                with self.captureOnCommitCallbacks(execute=True):
+                    delete_runtime_discussion(discussion.id, admin)
 
-        refresh_event = next(
-            event for event in events if isinstance(event, TagStatsRefreshRequestedEvent)
+        tag.refresh_from_db()
+        self.assertEqual(tag.discussion_count, 1)
+        self.assertEqual(tag.last_posted_discussion_id, newer_discussion.id)
+        refresh_tag_stats.assert_not_called()
+        self.assertFalse(any(isinstance(event, TagStatsRefreshRequestedEvent) for event in events))
+
+    def test_delete_latest_discussion_refreshes_tag_latest_discussion(self):
+        admin = User.objects.create_superuser(
+            username="discussion-delete-latest-tag-admin",
+            email="discussion-delete-latest-tag-admin@example.com",
+            password="password123",
         )
-        self.assertEqual(refresh_event.tag_ids, (tag.id,))
+        tag = Tag.objects.create(name="删除 latest 标签", slug="delete-latest-tag", color="#4d698e")
+        older_discussion = create_runtime_discussion(
+            title="Older delete tagged discussion",
+            content="Older content",
+            user=admin,
+            extension_payload=discussion_tags_payload([tag.id]),
+        )
+        latest_discussion = create_runtime_discussion(
+            title="Latest delete tagged discussion",
+            content="Latest content",
+            user=admin,
+            extension_payload=discussion_tags_payload([tag.id]),
+        )
+
+        with self.captureOnCommitCallbacks(execute=True):
+            delete_runtime_discussion(latest_discussion.id, admin)
+
+        tag.refresh_from_db()
+        self.assertEqual(tag.discussion_count, 1)
+        self.assertEqual(tag.last_posted_discussion_id, older_discussion.id)
 
     def test_cannot_create_discussion_with_secondary_tag_only(self):
         parent_tag = Tag.objects.create(name="开发", slug="dev")
