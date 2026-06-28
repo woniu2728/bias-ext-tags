@@ -369,20 +369,13 @@ class TagsExtensionRuntimeTests(ExtensionRuntimeTestMixin, TestCase):
         )
         group = Group.objects.create(name="TagGlobalSecondary", color="#4d698e")
         member.user_groups.add(group)
-        parent = Tag.objects.create(
-            name="全局次标签父级",
-            slug="global-secondary-parent",
-            position=0,
-            start_discussion_scope=Tag.ACCESS_MEMBERS,
-        )
         secondary = Tag.objects.create(
             name="全局次标签",
             slug="global-secondary",
-            parent=parent,
+            position=None,
             is_restricted=True,
             start_discussion_scope=Tag.ACCESS_MEMBERS,
         )
-        Permission.objects.create(group=group, permission=f"tag{parent.id}.startDiscussion")
         Permission.objects.create(group=group, permission=f"tag{secondary.id}.startDiscussion")
         if hasattr(member, "_forum_permission_cache"):
             delattr(member, "_forum_permission_cache")
@@ -1411,19 +1404,62 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
             slug="helper-child",
             parent=self.public_tag,
         )
+        secondary = Tag.objects.create(
+            name="Helper 次级标签",
+            slug="helper-secondary",
+            position=None,
+        )
 
         self.assertTrue(TagService.is_primary_tag(self.public_tag))
         self.assertFalse(TagService.is_child_tag(self.public_tag))
         self.assertFalse(TagService.is_primary_tag(child))
         self.assertTrue(TagService.is_child_tag(child))
+        self.assertFalse(TagService.is_primary_tag(secondary))
+        self.assertFalse(TagService.is_child_tag(secondary))
         self.assertEqual(
             set(Tag.objects.filter(TagService.primary_tag_filter()).values_list("id", flat=True)),
             {self.public_tag.id, self.members_tag.id, self.staff_tag.id},
         )
-        self.assertIn(
-            child.id,
+        self.assertEqual(
             set(Tag.objects.filter(TagService.secondary_tag_filter()).values_list("id", flat=True)),
+            {secondary.id},
         )
+
+    def test_tag_list_orders_primary_before_secondary_roots(self):
+        secondary = Tag.objects.create(
+            name="A 次级",
+            slug="a-secondary",
+            position=None,
+        )
+        primary = Tag.objects.create(
+            name="Z 主标签",
+            slug="z-primary",
+            position=4,
+        )
+
+        response = self.client.get("/api/tags")
+
+        self.assertEqual(response.status_code, 200, response.content)
+        slugs = [tag["slug"] for tag in response.json()["data"]]
+        self.assertLess(slugs.index(primary.slug), slugs.index(secondary.slug))
+
+    def test_creating_secondary_root_tag_exposes_nullable_position(self):
+        response = self.client.post(
+            "/api/tags",
+            data=json.dumps({
+                "name": "API 次级标签",
+                "slug": "api-secondary",
+                "is_primary": False,
+            }),
+            content_type="application/json",
+            **self.auth_header(self.admin),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertFalse(payload["is_primary"])
+        self.assertFalse(payload["is_child"])
+        self.assertIsNone(payload["position"])
 
     def test_tag_detail_exposes_registered_resource_fields(self):
         with self.captureOnCommitCallbacks(execute=True):
@@ -3566,6 +3602,23 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(response.status_code, 400, response.content)
         self.assertIn("次标签", response.json()["error"])
 
+    def test_can_create_discussion_with_root_secondary_tag_only(self):
+        secondary_tag = Tag.objects.create(name="公告", slug="announcement-secondary", position=None)
+
+        response = self.client.post(
+            "/api/discussions/",
+            data=json.dumps(discussion_resource_payload(
+                title="Secondary root only",
+                content="Allowed by root secondary semantics",
+                tag_ids=[secondary_tag.id],
+            )),
+            content_type="application/json",
+            **self.auth_header(),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["tags"][0]["id"], secondary_tag.id)
+
     def test_cannot_create_discussion_with_two_primary_tags(self):
         first_tag = Tag.objects.create(name="前端", slug="frontend")
         second_tag = Tag.objects.create(name="后端", slug="backend-main")
@@ -3726,6 +3779,43 @@ class AdminTagManagementApiTests(TestCase):
         self.assertIsNone(created_tag.parent_id)
         self.assertEqual(created_tag.position, 6)
         self.assertEqual(created_tag.reply_scope, "staff")
+
+    def test_admin_can_create_secondary_root_and_promote_to_primary(self):
+        response = self.client.post(
+            "/api/admin/tags",
+            data=json.dumps({
+                "name": "次级入口",
+                "slug": "secondary-entry",
+                "is_primary": False,
+            }),
+            content_type="application/json",
+            **self.auth_header(),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertFalse(payload["is_primary"])
+        self.assertIsNone(payload["position"])
+
+        secondary = Tag.objects.get(id=payload["id"])
+        self.assertIsNone(secondary.parent_id)
+        self.assertIsNone(secondary.position)
+
+        response = self.client.put(
+            f"/api/admin/tags/{secondary.id}",
+            data=json.dumps({"is_primary": True}),
+            content_type="application/json",
+            **self.auth_header(),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertTrue(payload["is_primary"])
+        self.assertIsNotNone(payload["position"])
+
+        secondary.refresh_from_db()
+        self.assertIsNone(secondary.parent_id)
+        self.assertIsNotNone(secondary.position)
 
     def test_admin_unrestricting_tag_deletes_tag_specific_permissions(self):
         restricted_tag = Tag.objects.create(
@@ -3920,6 +4010,31 @@ class AdminTagManagementApiTests(TestCase):
         self.assertEqual(sibling_child.position, 0)
         self.assertEqual(self.child_tag.parent_id, self.parent_tag.id)
         self.assertEqual(self.child_tag.position, 1)
+
+    def test_admin_order_tags_turns_omitted_root_tags_into_secondary(self):
+        response = self.client.post(
+            "/api/admin/tags/order",
+            data=json.dumps({
+                "order": [
+                    {"id": self.parent_tag.id, "children": [self.child_tag.id]},
+                ],
+            }),
+            content_type="application/json",
+            **self.auth_header(),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+
+        self.parent_tag.refresh_from_db()
+        self.child_tag.refresh_from_db()
+        self.other_root_tag.refresh_from_db()
+
+        self.assertEqual(self.parent_tag.position, 0)
+        self.assertEqual(self.child_tag.parent_id, self.parent_tag.id)
+        self.assertEqual(self.child_tag.position, 0)
+        self.assertIsNone(self.other_root_tag.parent_id)
+        self.assertIsNone(self.other_root_tag.position)
+        self.assertFalse(TagService.is_primary_tag(self.other_root_tag))
 
     def test_admin_order_tags_rejects_duplicate_ids(self):
         response = self.client.post(

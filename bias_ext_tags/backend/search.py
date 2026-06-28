@@ -60,7 +60,9 @@ def apply_tag_fulltext_search(state, query: str, context: dict):
 
 
 def search_tags(queryset, criteria, context: dict):
-    return queryset.order_by("position", "name", "id")
+    from bias_ext_tags.backend.services import TagService
+
+    return queryset.order_by(*TagService.structure_order_by(include_id=True))
 
 
 def _apply_discussion_tag_filter(queryset, raw_value: str, context: dict):

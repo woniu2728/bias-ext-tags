@@ -18,6 +18,7 @@ from bias_core.extensions.runtime import (
     validate_runtime_tag_scope_configuration,
 )
 from bias_ext_tags.backend.models import Tag
+from bias_ext_tags.backend.services import TagService
 
 
 router = Router()
@@ -32,6 +33,7 @@ def serialize_admin_tag(tag: Tag):
         "color": tag.color or "#888",
         "icon": tag.icon,
         "position": tag.position,
+        "is_primary": TagService.is_primary_tag(tag),
         "parent_id": tag.parent_id,
         "parent_name": tag.parent.name if tag.parent else None,
         "discussion_count": tag.discussion_count,
@@ -58,7 +60,7 @@ def normalize_tag_position(payload, parent_id=None, current_tag: Tag = None) -> 
     if "position" in payload and payload.get("position") is not None:
         return int(payload["position"])
 
-    queryset = Tag.objects.filter(parent_id=parent_id)
+    queryset = Tag.objects.filter(parent_id=parent_id, position__isnull=False)
     if current_tag is not None:
         queryset = queryset.exclude(id=current_tag.id)
     return (queryset.aggregate(max_position=Max("position")).get("max_position") or 0) + 1
@@ -70,7 +72,7 @@ def list_admin_tags(request):
     if denied:
         return denied
 
-    tags = Tag.objects.select_related("parent").all().order_by("position", "name")
+    tags = Tag.objects.select_related("parent").all().order_by(*TagService.structure_order_by())
     return [serialize_admin_tag(tag) for tag in tags]
 
 
@@ -93,6 +95,7 @@ def create_admin_tag(request, payload: dict = Body(...)):
             color=normalized.get("color") or "#888",
             icon=(normalized.get("icon") or "").strip(),
             position=normalize_tag_position(normalized, parent_id=parent_id),
+            is_primary=normalized.get("is_primary", True),
             parent_id=parent_id,
             is_hidden=bool(normalized.get("is_hidden", False)),
             is_restricted=bool(normalized.get("is_restricted", False)),
@@ -168,8 +171,10 @@ def update_admin_tag(request, tag_id: int, payload: dict = Body(...)):
             update_payload["color"] = normalized.get("color") or "#888"
         if "icon" in normalized:
             update_payload["icon"] = (normalized.get("icon") or "").strip()
-        if "position" in normalized and normalized.get("position") is not None:
-            update_payload["position"] = int(normalized["position"])
+        if "position" in normalized:
+            update_payload["position"] = None if normalized.get("position") is None else int(normalized["position"])
+        if "is_primary" in normalized:
+            update_payload["is_primary"] = bool(normalized["is_primary"])
         if "parent_id" in normalized:
             update_payload["parent_id"] = normalized.get("parent_id")
         if "is_hidden" in normalized:
@@ -211,7 +216,7 @@ def move_admin_tag(request, tag_id: int, payload: dict = Body(...)):
             direction=(payload.get("direction") or "").strip(),
             user=request.auth,
         )
-        tags = Tag.objects.select_related("parent").all().order_by("position", "name")
+        tags = Tag.objects.select_related("parent").all().order_by(*TagService.structure_order_by())
         log_admin_action(
             request,
             "admin.tag.move",

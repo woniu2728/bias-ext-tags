@@ -329,7 +329,9 @@ def resolve_forum_tags(forum, context: dict) -> list[dict]:
 
     user = context.get("user")
     child_queryset = filter_runtime_tags_for_user(
-        Tag.objects.filter(is_hidden=False).select_related("last_posted_discussion").order_by("position", "name"),
+        Tag.objects.filter(is_hidden=False)
+        .select_related("last_posted_discussion")
+        .order_by(*TagService.child_order_by()),
         user,
         action="view",
     )
@@ -338,7 +340,7 @@ def resolve_forum_tags(forum, context: dict) -> list[dict]:
         Tag.objects.filter(parent__isnull=True, is_hidden=False)
         .select_related("last_posted_discussion")
         .prefetch_related(Prefetch("children", queryset=child_queryset, to_attr="visible_children"))
-        .order_by("position", "name"),
+        .order_by(*TagService.structure_order_by()),
         user,
         action="view",
     )
@@ -428,7 +430,9 @@ def resolve_tag_parent(tag, context: dict):
 def resolve_tag_children(tag, context: dict) -> list[Tag]:
     children = getattr(tag, "visible_children", None)
     if children is None:
-        children = getattr(tag, "children", []).all().order_by("position", "name")
+        from bias_ext_tags.backend.services import TagService
+
+        children = getattr(tag, "children", []).all().order_by(*TagService.child_order_by())
     forbidden_tag_ids = context.get("forbidden_tag_ids")
     if forbidden_tag_ids is None:
         from bias_ext_tags.backend.services import TagService

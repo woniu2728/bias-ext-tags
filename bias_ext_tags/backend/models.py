@@ -22,7 +22,7 @@ class Tag(models.Model):
     color = models.CharField(max_length=20, blank=True)
     icon = models.CharField(max_length=100, blank=True)
     background_url = models.URLField(max_length=500, blank=True)
-    position = models.IntegerField(default=0)
+    position = models.IntegerField(null=True, blank=True, default=0)
     parent = models.ForeignKey(
         "self",
         on_delete=models.SET_NULL,
@@ -53,6 +53,8 @@ class Tag(models.Model):
         ordering = ["position", "name"]
         indexes = [
             models.Index(fields=["parent"], name="tags_parent__7fcc39_idx"),
+            models.Index(fields=["parent", "position", "name"], name="tags_parent_pos_name_idx"),
+            models.Index(fields=["position", "parent"], name="tags_position_parent_idx"),
         ]
 
     def __str__(self):

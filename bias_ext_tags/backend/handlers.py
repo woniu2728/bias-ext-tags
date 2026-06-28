@@ -36,7 +36,7 @@ def _build_tag_serialize_context(user=None, action="view"):
 def _get_prefetched_children(tag):
     if hasattr(tag, "visible_children"):
         return tag.visible_children
-    return tag.children.all().order_by("position", "name")
+    return tag.children.all().order_by(*TagService.child_order_by())
 
 
 def _serialize_tag(
@@ -147,7 +147,8 @@ def dispatch_tag_create(context):
             color=payload.color or "",
             icon=payload.icon or "",
             background_url=payload.background_url or "",
-            position=payload.position or 0,
+            position=payload.position,
+            is_primary=payload.is_primary,
             parent_id=payload.parent_id,
             is_hidden=payload.is_hidden or False,
             is_restricted=payload.is_restricted or False,
@@ -173,7 +174,7 @@ def dispatch_tag_index(context):
     if include_hidden and (not user or not user.is_staff):
         include_hidden = False
 
-    visible_child_queryset = Tag.objects.select_related("last_posted_discussion").order_by("position", "name")
+    visible_child_queryset = Tag.objects.select_related("last_posted_discussion").order_by(*TagService.child_order_by())
     if not include_hidden:
         visible_child_queryset = visible_child_queryset.filter(is_hidden=False)
     visible_child_queryset = TagService.filter_tags_for_user(visible_child_queryset, user, action=purpose)
@@ -198,7 +199,7 @@ def dispatch_tag_index(context):
         queryset = queryset.filter(is_hidden=False)
 
     queryset = TagService.filter_tags_for_user(queryset, user, action=purpose)
-    tags = queryset.order_by("position", "name")
+    tags = queryset.order_by(*TagService.structure_order_by())
 
     serialize_context = _build_tag_serialize_context(user, action=purpose)
     return {
@@ -297,6 +298,7 @@ def dispatch_tag_update(context):
             icon=payload.icon,
             background_url=payload.background_url,
             position=payload.position,
+            is_primary=payload.is_primary,
             parent_id=payload.parent_id,
             is_hidden=payload.is_hidden,
             is_restricted=payload.is_restricted,
