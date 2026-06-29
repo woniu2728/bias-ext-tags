@@ -582,15 +582,6 @@ class TagService:
         primary_tags = [tag for tag in tags if TagService.is_primary_tag(tag)]
         secondary_tags = [tag for tag in tags if not TagService.is_primary_tag(tag)]
         child_tags = [tag for tag in secondary_tags if tag.parent_id is not None]
-        settings = get_extension_settings("tags")
-        max_primary = TagService._settings_int(settings, "max_primary_tags", default=1)
-        max_secondary = TagService._settings_int(settings, "max_secondary_tags", default=1)
-
-        if len(primary_tags) > max_primary:
-            raise ValueError(f"当前最多只能选择 {max_primary} 个主标签")
-
-        if len(secondary_tags) > max_secondary:
-            raise ValueError(f"当前最多只能选择 {max_secondary} 个次标签")
 
         primary_tag_ids = {tag.id for tag in primary_tags}
         missing_parent_names = [
@@ -602,6 +593,29 @@ class TagService:
             raise ValueError("选择次标签时必须同时选择对应的主标签")
 
         return primary_tags + secondary_tags
+
+    @staticmethod
+    def validate_tag_count_limits(tags: List[Tag], user: Any = None) -> None:
+        if has_runtime_forum_permission(user, "bypassTagCounts"):
+            return
+
+        settings = get_extension_settings("tags")
+        min_primary = TagService._settings_int(settings, "min_primary_tags")
+        max_primary = TagService._settings_int(settings, "max_primary_tags", default=1)
+        min_secondary = TagService._settings_int(settings, "min_secondary_tags")
+        max_secondary = TagService._settings_int(settings, "max_secondary_tags", default=1)
+        primary_count = sum(1 for tag in tags if TagService.is_primary_tag(tag))
+        secondary_count = len(tags) - primary_count
+
+        TagService._validate_tag_count("主标签", primary_count, min_primary, max_primary)
+        TagService._validate_tag_count("次标签", secondary_count, min_secondary, max_secondary)
+
+    @staticmethod
+    def _validate_tag_count(label: str, count: int, minimum: int, maximum: int) -> None:
+        if count < minimum:
+            raise ValueError(f"当前至少需要选择 {minimum} 个{label}")
+        if count > maximum:
+            raise ValueError(f"当前最多只能选择 {maximum} 个{label}")
 
     @staticmethod
     def normalize_tag_slug(name: str, slug: Optional[str] = None, *, exclude_tag_id: Optional[int] = None) -> str:
@@ -642,6 +656,7 @@ class TagService:
     @staticmethod
     def ensure_can_start_discussion(user: Any, tag_ids: Optional[List[int]]) -> List[Tag]:
         tags = TagService.get_tags_for_selection(tag_ids)
+        TagService.validate_tag_count_limits(tags, user=user)
 
         for tag in tags:
             if not TagService.can_start_discussion_in_tag(tag, user):
@@ -654,6 +669,7 @@ class TagService:
         tags = TagService.get_tags_for_selection(tag_ids)
         if not TagService.can_tag_discussion(discussion, user):
             raise PermissionDenied("没有权限修改此讨论的标签")
+        TagService.validate_tag_count_limits(tags, user=user)
 
         old_tag_ids = set(get_discussion_tag_ids_for_stats(discussion))
         for tag in tags:

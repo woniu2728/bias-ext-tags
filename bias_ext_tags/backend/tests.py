@@ -3677,6 +3677,47 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(response.json()["tags"][0]["id"], secondary_tag.id)
 
+    def test_cannot_create_discussion_below_minimum_primary_tags(self):
+        set_tags_setting("min_primary_tags", 1)
+        secondary_tag = Tag.objects.create(
+            name="公告最小主标签",
+            slug="announcement-min-primary",
+            position=None,
+            is_primary=False,
+        )
+
+        response = self.client.post(
+            "/api/discussions/",
+            data=json.dumps(discussion_resource_payload(
+                title="Missing primary tag",
+                content="Blocked by configured minimum primary count",
+                tag_ids=[secondary_tag.id],
+            )),
+            content_type="application/json",
+            **self.auth_header(),
+        )
+
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn("至少需要选择 1 个主标签", response.json()["error"])
+
+    def test_cannot_create_discussion_below_minimum_secondary_tags(self):
+        set_tags_setting("min_secondary_tags", 1)
+        primary_tag = Tag.objects.create(name="主标签缺次级", slug="primary-missing-secondary")
+
+        response = self.client.post(
+            "/api/discussions/",
+            data=json.dumps(discussion_resource_payload(
+                title="Missing secondary tag",
+                content="Blocked by configured minimum secondary count",
+                tag_ids=[primary_tag.id],
+            )),
+            content_type="application/json",
+            **self.auth_header(),
+        )
+
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn("至少需要选择 1 个次标签", response.json()["error"])
+
     def test_cannot_create_discussion_with_two_primary_tags(self):
         first_tag = Tag.objects.create(name="前端", slug="frontend")
         second_tag = Tag.objects.create(name="后端", slug="backend-main")
@@ -3694,6 +3735,33 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
 
         self.assertEqual(response.status_code, 400, response.content)
         self.assertIn("主标签", response.json()["error"])
+
+    def test_bypass_tag_counts_allows_discussion_outside_configured_tag_counts(self):
+        set_tags_setting("min_primary_tags", 1)
+        set_tags_setting("max_primary_tags", 1)
+        group = Group.objects.create(name="TagCountBypassers", color="#4d698e")
+        Permission.objects.create(group=group, permission="startDiscussion")
+        Permission.objects.create(group=group, permission="bypassTagCounts")
+        self.author.user_groups.add(group)
+        first_tag = Tag.objects.create(name="绕过一", slug="bypass-one")
+        second_tag = Tag.objects.create(name="绕过二", slug="bypass-two")
+
+        response = self.client.post(
+            "/api/discussions/",
+            data=json.dumps(discussion_resource_payload(
+                title="Bypass tag counts",
+                content="Allowed by bypassTagCounts",
+                tag_ids=[first_tag.id, second_tag.id],
+            )),
+            content_type="application/json",
+            **self.auth_header(self.author),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(
+            set(response.json()["tags"][index]["id"] for index in range(2)),
+            {first_tag.id, second_tag.id},
+        )
 
     def test_can_create_discussion_with_multiple_primary_tags_when_limit_allows(self):
         set_tags_setting("max_primary_tags", 2)
@@ -3770,6 +3838,27 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
 
         self.assertEqual(response.status_code, 400, response.content)
         self.assertIn("对应的主标签", response.json()["error"])
+
+    def test_cannot_retag_discussion_outside_configured_tag_counts(self):
+        set_tags_setting("max_primary_tags", 1)
+        first_tag = Tag.objects.create(name="编辑原标签", slug="edit-original")
+        second_tag = Tag.objects.create(name="编辑额外标签", slug="edit-extra")
+        discussion = create_runtime_discussion(
+            title="Retag count limits",
+            content="Original content",
+            user=self.author,
+            extension_payload=discussion_tags_payload([first_tag.id]),
+        )
+
+        response = self.client.patch(
+            f"/api/discussions/{discussion.id}",
+            data=json.dumps(discussion_tags_payload([first_tag.id, second_tag.id])),
+            content_type="application/json",
+            **self.auth_header(self.author),
+        )
+
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn("最多只能选择 1 个主标签", response.json()["error"])
 
     def test_cannot_create_discussion_with_mismatched_parent_child_tags(self):
         first_tag = Tag.objects.create(name="前端", slug="frontend-main")
