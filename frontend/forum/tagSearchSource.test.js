@@ -29,6 +29,6 @@ test('tag search source builds navigable tag result items', () => {
   assert.equal(item.key, 'tag-7')
   assert.equal(item.path, '/t/support')
   assert.equal(item.titleText, 'Support')
-  assert.deepEqual(item.metaItems, ['/support', '12 条讨论'])
+  assert.deepEqual(item.metaItems, ['/t/support', '12 条讨论'])
   assert.match(item.titleHtml, /Support|mark/)
 })

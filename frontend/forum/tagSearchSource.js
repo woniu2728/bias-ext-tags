@@ -22,6 +22,7 @@ export function createTagSearchSource() {
     buildResultItems(items, { query } = {}) {
       return items.map(tag => {
         const discussionCount = Number(tag.discussion_count || 0)
+        const path = buildTagPath(tag)
         const countText = getUiCopy({
           surface: 'search-tag-result-discussions',
           count: discussionCount,
@@ -32,10 +33,10 @@ export function createTagSearchSource() {
           excerptHtml: renderTwemojiHtml(highlightSearchText(tag.description || countText, query, 160)),
           iconClass: tag.icon || 'fas fa-tags',
           metaItems: [
-            `/${tag.slug}`,
+            path,
             countText,
           ],
-          path: buildTagPath(tag),
+          path,
           titleHtml: renderTwemojiHtml(highlightSearchText(tag.name || tag.slug || '标签', query, 80)),
           titleText: tag.name || tag.slug || '标签',
           userLayout: false,
