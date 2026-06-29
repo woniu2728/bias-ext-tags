@@ -76,7 +76,7 @@ from bias_ext_tags.backend.resources import (
     tag_resource_field_definitions,
     tag_resource_relationship_definitions,
 )
-from bias_ext_tags.backend.handlers import order_tags_api_route
+from bias_ext_tags.backend.order_controller import order_tags_api_route
 from bias_ext_tags.backend.runtime import tag_service_provider
 from bias_ext_tags.backend.runtime_models import DISCUSSION_MODEL, POST_MODEL
 from bias_ext_tags.backend.services import TagService
