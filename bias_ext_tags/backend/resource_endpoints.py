@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from bias_core.extensions.platform import ResourceQueryOptions, apply_resource_preloads, parse_resource_query_options, serialize_resource_jsonapi_response, wants_jsonapi_response
+from bias_core.extensions.platform import ResourceQueryOptions, apply_resource_preloads, parse_resource_query_options, serialize_resource_jsonapi_response, serialize_resource_plain, wants_jsonapi_response
 from bias_core.extensions.platform import merge_resource_includes
 from bias_ext_tags.backend.models import Tag
 from bias_ext_tags.backend.services import TagService
@@ -64,12 +64,12 @@ def _serialize_tag(
     context.setdefault("user", user)
     context.setdefault("action", action)
     resource_options = resource_options or ResourceQueryOptions()
-    payload = _get_resource_registry().serialize(
+    payload = serialize_resource_plain(
+        _get_resource_registry(),
         "tag",
         tag,
         context,
-        only=resource_options.fields,
-        include=resource_options.includes,
+        resource_options=resource_options,
     )
     if "children" in resource_options.includes:
         return payload
