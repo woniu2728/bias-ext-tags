@@ -4,6 +4,7 @@ from bias_ext_tags.backend.constants import EXTENSION_ID
 from bias_ext_tags.backend.search import (
     apply_discussion_tag_list_query,
     apply_discussion_tag_search_filter,
+    apply_post_tag_search_filter,
     hide_hidden_tag_discussions_from_all_list,
     parse_tag_search_filter,
 )
@@ -37,6 +38,16 @@ def search_filter_definitions():
             applier=apply_discussion_tag_search_filter,
             syntax="tag:<slug>",
             description="按标签 slug 过滤讨论搜索结果。",
+        ),
+        SearchFilterDefinition(
+            code="tag",
+            label="按标签过滤",
+            module_id=EXTENSION_ID,
+            target="post",
+            parser=parse_tag_search_filter,
+            applier=apply_post_tag_search_filter,
+            syntax="tag:<slug>",
+            description="按讨论标签 slug 过滤帖子搜索结果。",
         ),
     )
 

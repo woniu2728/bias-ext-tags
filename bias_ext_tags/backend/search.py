@@ -22,6 +22,10 @@ def apply_discussion_tag_search_filter(queryset, tag_slug: str, context: dict):
     return _apply_discussion_tag_filter(queryset, tag_slug, context)
 
 
+def apply_post_tag_search_filter(queryset, tag_slug: str, context: dict):
+    return _apply_post_tag_filter(queryset, tag_slug, context)
+
+
 def apply_discussion_tag_list_query(queryset, context: dict):
     tag_slug = _query_param_value((context or {}).get("params"), "tag")
     if not tag_slug:
@@ -66,6 +70,14 @@ def search_tags(queryset, criteria, context: dict):
 
 
 def _apply_discussion_tag_filter(queryset, raw_value: str, context: dict):
+    return _apply_tag_filter(queryset, raw_value, context, discussion_ref="pk")
+
+
+def _apply_post_tag_filter(queryset, raw_value: str, context: dict):
+    return _apply_tag_filter(queryset, raw_value, context, discussion_ref="discussion_id")
+
+
+def _apply_tag_filter(queryset, raw_value: str, context: dict, *, discussion_ref: str):
     groups = _tag_slug_groups(raw_value)
     if not groups:
         return queryset
@@ -73,28 +85,29 @@ def _apply_discussion_tag_filter(queryset, raw_value: str, context: dict):
     slug_to_id = _resolve_tag_slug_ids(groups, context)
     output = queryset
     for group in groups:
-        condition = Q()
-        for slug in group:
-            if slug == "untagged":
-                condition |= ~Exists(
-                    DiscussionTag.objects.filter(discussion_id=OuterRef("pk"))
-                )
-                continue
-
-            tag_id = slug_to_id.get(slug)
-            if tag_id is None:
-                continue
-            condition |= Exists(
-                DiscussionTag.objects.filter(
-                    discussion_id=OuterRef("pk"),
-                    tag_id=tag_id,
-                )
-            )
+        condition = _discussion_tag_group_condition(group, slug_to_id, discussion_ref)
 
         if not condition:
             return queryset.none()
         output = output.filter(condition)
     return output
+
+
+def _discussion_tag_group_condition(group: tuple[str, ...], slug_to_id: dict[str, int], discussion_ref: str):
+    discussion_tags = DiscussionTag.objects.filter(discussion_id=OuterRef(discussion_ref))
+    condition = Q()
+
+    for slug in group:
+        if slug == "untagged":
+            condition |= ~Exists(discussion_tags)
+            continue
+
+        tag_id = slug_to_id.get(slug)
+        if tag_id is None:
+            continue
+        condition |= Exists(discussion_tags.filter(tag_id=tag_id))
+
+    return condition
 
 
 def _tag_slug_groups(raw_value: str) -> tuple[tuple[str, ...], ...]:
@@ -124,17 +137,40 @@ def _resolve_tag_slug_ids(groups: tuple[tuple[str, ...], ...], context: dict) ->
     if not slugs:
         return {}
 
+    cache = None
+    if isinstance(context, dict):
+        cache = context.setdefault("_tag_slug_ids_cache", {})
+        missing_slugs = tuple(slug for slug in slugs if slug not in cache)
+    else:
+        missing_slugs = slugs
+
+    if cache is not None and not missing_slugs:
+        return {
+            slug: int(cache[slug])
+            for slug in slugs
+            if cache.get(slug) is not None
+        }
+
     resolved = resolve_runtime_model_slugs(
         Tag,
-        slugs,
+        missing_slugs,
         identifier=None,
         context={"user": (context or {}).get("user")},
     )
-    return {
+    resolved_ids = {
         slug: int(tag.id)
         for slug, tag in resolved.items()
         if getattr(tag, "id", None)
     }
+    if cache is not None:
+        for slug in missing_slugs:
+            cache[slug] = resolved_ids.get(slug)
+        return {
+            slug: int(cache[slug])
+            for slug in slugs
+            if cache.get(slug) is not None
+        }
+    return resolved_ids
 
 
 def _query_param_value(params, key: str):

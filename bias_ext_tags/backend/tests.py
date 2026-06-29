@@ -2308,8 +2308,152 @@ class TagSearchApiTests(ExtensionRuntimeTestMixin, TestCase):
             {first_discussion.id, second_discussion.id},
         )
 
+    def test_search_api_posts_support_registered_tag_filter_syntax(self):
+        target_tag = Tag.objects.create(name="帖子搜索标签", slug="post-search-tag")
+        other_tag = Tag.objects.create(name="帖子其他标签", slug="post-other-tag")
+        matched_discussion = create_runtime_discussion(
+            title="帖子标签搜索命中讨论",
+            content="首帖内容",
+            user=self.user,
+            extension_payload=discussion_tags_payload([target_tag.id]),
+        )
+        other_discussion = create_runtime_discussion(
+            title="帖子标签搜索未命中讨论",
+            content="首帖内容",
+            user=self.user,
+            extension_payload=discussion_tags_payload([other_tag.id]),
+        )
+        matched_post = create_runtime_post(
+            discussion_id=matched_discussion.id,
+            content="帖子标签搜索关键字",
+            user=self.user,
+        )
+        create_runtime_post(
+            discussion_id=other_discussion.id,
+            content="帖子标签搜索关键字",
+            user=self.user,
+        )
+
+        response = self.client.get(
+            "/api/search",
+            {"q": "帖子标签搜索关键字 tag:post-search-tag", "type": "posts"},
+            **self.auth_header(),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertEqual(payload["post_total"], 1)
+        self.assertEqual([item["id"] for item in payload["posts"]], [matched_post.id])
+
+    def test_search_api_posts_tag_filter_supports_comma_or_slugs(self):
+        first_tag = Tag.objects.create(name="帖子搜索标签一", slug="post-filter-one")
+        second_tag = Tag.objects.create(name="帖子搜索标签二", slug="post-filter-two")
+        other_tag = Tag.objects.create(name="帖子搜索标签三", slug="post-filter-three")
+        first_discussion = create_runtime_discussion(
+            title="帖子标签并集命中一",
+            content="首帖内容",
+            user=self.user,
+            extension_payload=discussion_tags_payload([first_tag.id]),
+        )
+        second_discussion = create_runtime_discussion(
+            title="帖子标签并集命中二",
+            content="首帖内容",
+            user=self.user,
+            extension_payload=discussion_tags_payload([second_tag.id]),
+        )
+        other_discussion = create_runtime_discussion(
+            title="帖子标签并集未命中",
+            content="首帖内容",
+            user=self.user,
+            extension_payload=discussion_tags_payload([other_tag.id]),
+        )
+        first_post = create_runtime_post(
+            discussion_id=first_discussion.id,
+            content="post-or-filter-keyword",
+            user=self.user,
+        )
+        second_post = create_runtime_post(
+            discussion_id=second_discussion.id,
+            content="post-or-filter-keyword",
+            user=self.user,
+        )
+        create_runtime_post(
+            discussion_id=other_discussion.id,
+            content="post-or-filter-keyword",
+            user=self.user,
+        )
+
+        response = self.client.get(
+            "/api/search",
+            {"q": "post-or-filter-keyword tag:post-filter-one,post-filter-two", "type": "posts"},
+            **self.auth_header(),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertEqual(payload["post_total"], 2)
+        self.assertEqual({item["id"] for item in payload["posts"]}, {first_post.id, second_post.id})
+
+    def test_search_api_posts_multiple_tag_filters_resolve_slugs_with_one_lookup(self):
+        primary_tag = Tag.objects.create(name="帖子交集主标签", slug="post-and-primary")
+        secondary_tag = Tag.objects.create(
+            name="帖子交集次标签",
+            slug="post-and-secondary",
+            position=None,
+            is_primary=False,
+        )
+        matched_discussion = create_runtime_discussion(
+            title="帖子标签交集命中",
+            content="首帖内容",
+            user=self.user,
+            extension_payload=discussion_tags_payload([primary_tag.id, secondary_tag.id]),
+        )
+        partial_discussion = create_runtime_discussion(
+            title="帖子标签交集缺一",
+            content="首帖内容",
+            user=self.user,
+            extension_payload=discussion_tags_payload([primary_tag.id]),
+        )
+        matched_post = create_runtime_post(
+            discussion_id=matched_discussion.id,
+            content="post-and-filter-keyword",
+            user=self.user,
+        )
+        create_runtime_post(
+            discussion_id=partial_discussion.id,
+            content="post-and-filter-keyword",
+            user=self.user,
+        )
+
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get(
+                "/api/search",
+                {"q": "post-and-filter-keyword tag:post-and-primary tag:post-and-secondary", "type": "posts"},
+                **self.auth_header(),
+            )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual([item["id"] for item in response.json()["posts"]], [matched_post.id])
+        slug_resolution_queries = [
+            query["sql"]
+            for query in queries
+            if 'from "tags"' in query["sql"].lower()
+            and '"slug" in' in query["sql"].lower()
+        ]
+        self.assertEqual(
+            len(slug_resolution_queries),
+            1,
+            f"Expected one batched slug lookup across repeated post tag filters, got {len(slug_resolution_queries)}: {slug_resolution_queries}",
+        )
+
     def test_search_filters_api_exposes_registered_tag_filter_syntax(self):
         response = self.client.get("/api/search/filters", {"target": "discussions"})
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertIn("tag:<slug>", {item["syntax"] for item in response.json()["filters"]})
+
+    def test_search_filters_api_exposes_registered_post_tag_filter_syntax(self):
+        response = self.client.get("/api/search/filters", {"target": "posts"})
 
         self.assertEqual(response.status_code, 200, response.content)
         self.assertIn("tag:<slug>", {item["syntax"] for item in response.json()["filters"]})
