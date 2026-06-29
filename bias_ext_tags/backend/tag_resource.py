@@ -183,7 +183,9 @@ class TagResource(DatabaseResource):
             .set_relationship_with(_set_tag_parent_relationship)
             .writable_when(_tag_parent_relationship_writable),
             ResourceRelationship("children", resolver=_resolve_tag_children, module_id=EXTENSION_ID)
-            .to_many("tag"),
+            .to_many("tag")
+            .scope(_scope_tag_children_relationship)
+            .prefetch_to("visible_children"),
             ResourceRelationship("lastPostedDiscussion", resolver=_resolve_tag_last_posted_discussion, module_id=EXTENSION_ID)
             .to_one("discussion"),
         ]
@@ -222,14 +224,12 @@ class TagResource(DatabaseResource):
 
         queryset = Tag.objects.select_related("last_posted_discussion", "parent").all()
         if children_requested:
-            visible_child_queryset = Tag.objects.select_related("last_posted_discussion").order_by(*TagService.child_order_by())
-            if not include_hidden:
-                visible_child_queryset = visible_child_queryset.filter(is_hidden=False)
-            visible_child_queryset = TagService.filter_tags_for_user(visible_child_queryset, user, action=purpose)
-            if discussion_tag_ids:
-                visible_child_queryset = visible_child_queryset | Tag.objects.filter(id__in=discussion_tag_ids)
             queryset = queryset.prefetch_related(
-                Prefetch("children", queryset=visible_child_queryset, to_attr="visible_children")
+                Prefetch(
+                    "children",
+                    queryset=_scope_tag_children_relationship(Tag.objects.all(), context),
+                    to_attr="visible_children",
+                )
             )
 
         parent_id = tag_int_query_value(context, "parent_id")
@@ -433,6 +433,23 @@ def _resolve_tag_children(tag, context):
     from bias_ext_tags.backend.resources import resolve_tag_children
 
     return resolve_tag_children(tag, context)
+
+
+def _scope_tag_children_relationship(queryset, context):
+    from bias_ext_tags.backend.services import TagService
+
+    output = queryset.select_related("last_posted_discussion").order_by(*TagService.child_order_by())
+    if not context.get("include_hidden"):
+        output = output.filter(is_hidden=False)
+    output = TagService.filter_tags_for_user(
+        output,
+        context.get("user"),
+        action=context.get("action") or context.get("purpose") or "view",
+    )
+    discussion_tag_ids = tuple(context.get("discussion_tag_ids") or ())
+    if discussion_tag_ids:
+        output = output | Tag.objects.filter(id__in=discussion_tag_ids)
+    return output
 
 
 def _resolve_tag_last_posted_discussion(tag, context):

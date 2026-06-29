@@ -3085,6 +3085,8 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertFalse(relationships["parent"].writable(None, {"payload": {"data": {"attributes": {"isPrimary": False}}}}))
         self.assertEqual(relationships["children"].resource_type, "tag")
         self.assertTrue(relationships["children"].many)
+        self.assertTrue(callable(relationships["children"].scope_callback))
+        self.assertEqual(relationships["children"].prefetch_to_attr, "visible_children")
         self.assertEqual(relationships["lastPostedDiscussion"].resource_type, "discussion")
 
     def test_tag_resource_payload_applies_flarum_writable_fields_and_parent_relationship(self):
