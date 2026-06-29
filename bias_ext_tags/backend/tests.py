@@ -3144,6 +3144,62 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
             "Discussion list tag serialization should reuse prefetched tag links instead of querying per discussion.",
         )
 
+    def test_post_list_nested_discussion_tags_include_uses_prefetched_links(self):
+        tags = [
+            Tag.objects.create(
+                name="帖子讨论主标签",
+                slug="post-discussion-primary-tag",
+                position=1,
+                is_primary=True,
+            ),
+            Tag.objects.create(
+                name="帖子讨论次标签",
+                slug="post-discussion-secondary-tag",
+                position=None,
+                is_primary=False,
+            ),
+        ]
+        discussion = create_runtime_discussion(
+            title="Post list discussion tags include",
+            content="用于验证帖子列表嵌套讨论标签 include。",
+            user=self.author,
+            extension_payload=discussion_tags_payload([tag.id for tag in tags]),
+        )
+        for index in range(5):
+            create_runtime_post(
+                discussion_id=discussion.id,
+                content=f"帖子列表嵌套标签回复 {index}",
+                user=self.author,
+            )
+
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get(
+                f"/api/discussions/{discussion.id}/posts",
+                {"include": "discussion.tags", "limit": 10},
+                **self.auth_header(self.reader),
+            )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertGreaterEqual(len(payload["data"]), 5)
+        self.assertTrue(
+            all(
+                [item["slug"] for item in post["discussion"]["tags"]] == [tag.slug for tag in tags]
+                for post in payload["data"]
+            )
+        )
+        per_post_tag_queries = [
+            query["sql"]
+            for query in queries
+            if re.search(r'\bfrom\s+["`]?discussion_tag["`]?', query["sql"].lower())
+            and re.search(r'\bwhere\s+["`]?discussion_tag["`]?\.\s*["`]?discussion_id["`]?\s*=\s*\d+\b', query["sql"].lower())
+        ]
+        self.assertEqual(
+            per_post_tag_queries,
+            [],
+            "Post list nested discussion.tags include should reuse the prefetched discussion tag links.",
+        )
+
     def test_discussion_list_tag_filter_uses_active_slug_driver(self):
         set_active_slug_driver(Tag, "id_with_slug")
         first_tag = Tag.objects.create(name="列表 ID 标签一", slug="list-id-filter-one")

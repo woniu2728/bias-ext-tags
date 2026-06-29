@@ -294,6 +294,11 @@ def post_integration_extenders():
             many=True,
             description="标签变更事件帖中涉及的标签关系。",
         )
+        .eager_load_when_included(
+            "index",
+            "discussion",
+            "discussion__discussion_tags__tag",
+        )
         .add_default_include(("index",), ("eventPostMentionsTags",)),
         EventListenersExtender(
             listeners=post_event_listener_definitions(),
