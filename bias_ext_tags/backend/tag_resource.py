@@ -289,10 +289,10 @@ class TagResource(DatabaseResource):
         return TagService.filter_tags_for_user(queryset, user, action=action)
 
     def results(self, queryset, context):
-        from bias_ext_tags.backend.resource_endpoints import _apply_tag_resource_preloads
+        from bias_ext_tags.backend.preloads import apply_tag_resource_preloads
         from bias_ext_tags.backend.services import TagService
 
-        queryset = _apply_tag_resource_preloads(
+        queryset = apply_tag_resource_preloads(
             queryset.distinct(),
             user=context.get("user"),
             action=context.get("action") or "view",

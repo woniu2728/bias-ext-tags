@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from bias_core.extensions.platform import ResourceQueryOptions, apply_resource_preloads, serialize_resource_jsonapi_response, serialize_resource_plain, wants_jsonapi_response
+from bias_core.extensions.platform import ResourceQueryOptions, serialize_resource_jsonapi_response, serialize_resource_plain, wants_jsonapi_response
+from bias_ext_tags.backend.preloads import apply_tag_resource_preloads as _apply_tag_resource_preloads
 from bias_ext_tags.backend.models import Tag
 from bias_ext_tags.backend.query_params import (
     can_include_hidden_tags as _can_include_hidden_tags,
@@ -129,18 +130,6 @@ def _jsonapi_tags_response(tags, context, *, action="view"):
         _jsonapi_serialize_context(context, action=action),
         resource_options=resource_options,
         many=True,
-    )
-
-
-def _apply_tag_resource_preloads(queryset, user=None, action="view", resource_options=None):
-    resource_options = resource_options or ResourceQueryOptions()
-    queryset = TagService.prefetch_state_for_user(queryset, user)
-    return apply_resource_preloads(
-        _get_resource_registry(),
-        queryset,
-        "tag",
-        context={"user": user, "action": action},
-        resource_options=resource_options,
     )
 
 
