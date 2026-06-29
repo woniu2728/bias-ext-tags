@@ -2748,7 +2748,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         )
 
         with patch(
-            "bias_ext_tags.backend.handlers.TagService.get_forbidden_tag_ids",
+            "bias_ext_tags.backend.resource_endpoints.TagService.get_forbidden_tag_ids",
             wraps=TagService.get_forbidden_tag_ids,
         ) as get_forbidden_tag_ids, CaptureQueriesContext(connection) as queries:
             response = self.client.get("/api/tags", {"include_children": False})

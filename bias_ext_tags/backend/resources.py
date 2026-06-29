@@ -418,12 +418,14 @@ def resolve_tag_children(tag, context: dict) -> list[Tag]:
         from bias_ext_tags.backend.services import TagService
 
         children = getattr(tag, "children", []).all().order_by(*TagService.child_order_by())
-    forbidden_tag_ids = context.get("forbidden_tag_ids")
+    cache = context.setdefault("_tag_cache", {})
+    forbidden_tag_ids = cache.get("forbidden_tag_ids")
     if forbidden_tag_ids is None:
         from bias_ext_tags.backend.services import TagService
 
         forbidden_tag_ids = set(TagService.get_forbidden_tag_ids(context.get("user"), action=context.get("action", "view")))
-        context["forbidden_tag_ids"] = forbidden_tag_ids
+        cache["forbidden_tag_ids"] = forbidden_tag_ids
+    context["forbidden_tag_ids"] = forbidden_tag_ids
     return [
         child
         for child in children

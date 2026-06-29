@@ -245,6 +245,7 @@ class TagResource(DatabaseResource):
         context["include_children"] = include_children
         context["children_requested"] = children_requested
         context["discussion_tag_ids"] = discussion_tag_ids
+        context.setdefault("_tag_cache", {})
 
         queryset = Tag.objects.select_related("last_posted_discussion", "parent").all()
         if children_requested:

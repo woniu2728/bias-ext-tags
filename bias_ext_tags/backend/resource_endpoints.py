@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from bias_core.extensions.platform import ResourceQueryOptions, parse_resource_query_options, serialize_resource_jsonapi_response, wants_jsonapi_response
+from bias_core.extensions.platform import ResourceQueryOptions, apply_resource_preloads, parse_resource_query_options, serialize_resource_jsonapi_response, wants_jsonapi_response
 from bias_core.extensions.platform import merge_resource_includes
 from bias_ext_tags.backend.models import Tag
 from bias_ext_tags.backend.services import TagService
@@ -31,7 +31,7 @@ def _build_tag_serialize_context(user=None, action="view"):
     return {
         "user": user,
         "action": action,
-        "forbidden_tag_ids": None,
+        "_tag_cache": {},
         "plain_related_fields": {
             "discussion": ("id", "title", "slug", "last_post_number", "last_posted_at"),
         },
@@ -39,9 +39,11 @@ def _build_tag_serialize_context(user=None, action="view"):
 
 
 def _get_forbidden_tag_ids(context, user=None, action="view"):
-    if context.get("forbidden_tag_ids") is None:
-        context["forbidden_tag_ids"] = set(TagService.get_forbidden_tag_ids(user, action=action))
-    return context["forbidden_tag_ids"]
+    cache = context.setdefault("_tag_cache", {})
+    if "forbidden_tag_ids" not in cache:
+        cache["forbidden_tag_ids"] = set(TagService.get_forbidden_tag_ids(user, action=action))
+    context["forbidden_tag_ids"] = cache["forbidden_tag_ids"]
+    return cache["forbidden_tag_ids"]
 
 
 def _get_prefetched_children(tag):
@@ -136,12 +138,12 @@ def _jsonapi_tags_response(tags, context, *, action="view"):
 def _apply_tag_resource_preloads(queryset, user=None, action="view", resource_options=None):
     resource_options = resource_options or ResourceQueryOptions()
     queryset = TagService.prefetch_state_for_user(queryset, user)
-    return _get_resource_registry().apply_preload_plan(
+    return apply_resource_preloads(
+        _get_resource_registry(),
         queryset,
         "tag",
-        {"user": user, "action": action},
-        only=resource_options.fields,
-        include=resource_options.includes,
+        context={"user": user, "action": action},
+        resource_options=resource_options,
     )
 
 
