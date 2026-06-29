@@ -637,6 +637,7 @@ class TagService:
 
     @staticmethod
     def normalize_tag_slug(name: str, slug: Optional[str] = None, *, exclude_tag_id: Optional[int] = None) -> str:
+        TagService.validate_slug_value(slug)
         runtime_slug = generate_runtime_model_slug(
             Tag,
             name,
@@ -663,6 +664,21 @@ class TagService:
                 return normalized_slug
             normalized_slug = f"{original_slug}-{counter}"
             counter += 1
+
+    @staticmethod
+    def validate_slug_value(slug: Optional[str]) -> None:
+        if slug is None:
+            return
+        normalized = str(slug or "").strip()
+        if "/" in normalized or any(item.isspace() for item in normalized):
+            raise ValueError("标签 slug 不能包含斜杠或空白字符")
+
+    @staticmethod
+    def validate_description_value(description: Optional[str]) -> str:
+        normalized = description or ""
+        if len(normalized) > 700:
+            raise ValueError("标签描述不能超过 700 个字符")
+        return normalized
 
     @staticmethod
     def normalize_default_sort(value: Optional[str]) -> Optional[str]:
@@ -814,7 +830,7 @@ class TagService:
             tag = Tag.objects.create(
                 name=name,
                 slug=TagService.normalize_tag_slug(name, slug),
-                description=description,
+                description=TagService.validate_description_value(description),
                 color=color,
                 icon=icon,
                 background_url=background_url,
@@ -961,7 +977,7 @@ class TagService:
                 tag.slug = slug
 
             if description is not None:
-                tag.description = description
+                tag.description = TagService.validate_description_value(description)
 
             if color is not None:
                 tag.color = color

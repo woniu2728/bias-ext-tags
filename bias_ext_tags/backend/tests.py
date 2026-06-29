@@ -1311,6 +1311,39 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(update_response.json()["default_sort"], "top")
         self.assertEqual(Tag.objects.get(id=tag_id).default_sort, "top")
 
+    def test_tag_resource_rejects_slug_with_slash_or_space(self):
+        slash_response = self.client.post(
+            "/api/tags",
+            data=json.dumps({"name": "非法 slug 标签", "slug": "invalid/slug"}),
+            content_type="application/json",
+            **self.auth_header(self.admin),
+        )
+        space_response = self.client.post(
+            "/api/tags",
+            data=json.dumps({"name": "非法空白 slug 标签", "slug": "invalid slug"}),
+            content_type="application/json",
+            **self.auth_header(self.admin),
+        )
+
+        self.assertEqual(slash_response.status_code, 400, slash_response.content)
+        self.assertEqual(space_response.status_code, 400, space_response.content)
+        self.assertFalse(Tag.objects.filter(name__in=["非法 slug 标签", "非法空白 slug 标签"]).exists())
+
+    def test_tag_resource_rejects_description_longer_than_flarum_limit(self):
+        response = self.client.post(
+            "/api/tags",
+            data=json.dumps({
+                "name": "描述过长标签",
+                "slug": "long-description-tag",
+                "description": "x" * 701,
+            }),
+            content_type="application/json",
+            **self.auth_header(self.admin),
+        )
+
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertFalse(Tag.objects.filter(slug="long-description-tag").exists())
+
     def test_member_with_tag_management_permissions_can_use_resource_endpoints(self):
         group = Group.objects.create(name="ResourceTagManagers", color="#4d698e")
         Permission.objects.create(group=group, permission="tag.create")
@@ -5117,6 +5150,39 @@ class AdminTagManagementApiTests(TestCase):
         self.assertEqual(created_tag.position, 6)
         self.assertEqual(created_tag.default_sort, "top")
         self.assertEqual(created_tag.reply_scope, "staff")
+
+    def test_admin_tag_api_rejects_slug_with_slash_or_space(self):
+        slash_response = self.client.post(
+            "/api/admin/tags",
+            data=json.dumps({"name": "后台非法 slug", "slug": "admin/invalid"}),
+            content_type="application/json",
+            **self.auth_header(),
+        )
+        space_response = self.client.post(
+            "/api/admin/tags",
+            data=json.dumps({"name": "后台非法空白 slug", "slug": "admin invalid"}),
+            content_type="application/json",
+            **self.auth_header(),
+        )
+
+        self.assertEqual(slash_response.status_code, 400, slash_response.content)
+        self.assertEqual(space_response.status_code, 400, space_response.content)
+        self.assertFalse(Tag.objects.filter(name__in=["后台非法 slug", "后台非法空白 slug"]).exists())
+
+    def test_admin_tag_api_rejects_description_longer_than_flarum_limit(self):
+        response = self.client.post(
+            "/api/admin/tags",
+            data=json.dumps({
+                "name": "后台描述过长",
+                "slug": "admin-long-description",
+                "description": "x" * 701,
+            }),
+            content_type="application/json",
+            **self.auth_header(),
+        )
+
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertFalse(Tag.objects.filter(slug="admin-long-description").exists())
 
     def test_admin_can_create_secondary_root_and_promote_to_primary(self):
         response = self.client.post(
