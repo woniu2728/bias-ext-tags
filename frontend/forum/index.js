@@ -13,6 +13,7 @@ import DiscussionComposerTagFields from './DiscussionComposerTagFields.vue'
 import DiscussionSidebarTagsSection from './DiscussionSidebarTagsSection.vue'
 import TagDiscussionModal from './TagDiscussionModal.vue'
 import { createTagSearchSource } from './tagSearchSource.js'
+import { loadTagTree } from './tagListState.js'
 import { TagModel } from './tagModel.js'
 import {
   buildTagPath,
@@ -94,11 +95,7 @@ function registerTagsForum(forum) {
       return {
         currentTagSlug,
         async loadResources({ resourceStore }) {
-          const tagsResponse = await api.get('/tags', {
-            params: {
-              include_children: true,
-            },
-          })
+          const normalizedTags = await loadTagTree()
           let currentTagResponse = null
           if (currentTagSlug) {
             try {
@@ -107,12 +104,10 @@ function registerTagsForum(forum) {
               console.error('加载标签详情失败:', error)
             }
           }
-          const tags = unwrapTagList(tagsResponse).map(normalizeTag)
-          resourceStore.upsertMany('tags', tags)
+          resourceStore.upsertMany('tags', normalizedTags)
           const currentTag = currentTagResponse
             ? resourceStore.upsert('tags', normalizeTag(currentTagResponse))
             : null
-          const normalizedTags = unwrapTagList(tagsResponse).map(normalizeTag)
           return {
             contextData: buildTagsSidebarContextData({
               currentTag,
@@ -135,12 +130,7 @@ function registerTagsForum(forum) {
     isVisible: ({ route }) => route?.name !== 'tag-detail',
     resolve: () => ({
       async loadResources({ resourceStore }) {
-        const response = await api.get('/tags', {
-          params: {
-            include_children: true,
-          },
-        })
-        const normalizedTags = unwrapTagList(response).map(normalizeTag)
+        const normalizedTags = await loadTagTree()
         resourceStore.upsertMany('tags', normalizedTags)
         return {
           contextData: buildTagsSidebarContextData({

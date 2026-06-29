@@ -1,4 +1,5 @@
 import { api, ref } from '@bias/core'
+import { loadTagTree } from './tagListState.js'
 
 export function createTagsLoadState({
   fetchTags,
@@ -48,13 +49,14 @@ export function useTagsLoadState({
   resourceState,
 }) {
   return createTagsLoadState({
-    async fetchTags() {
-      return api.get('/tags', {
+    fetchTags: async () => loadTagTree({
+      force: true,
+      fetchTags: () => api.get('/tags', {
         params: {
           include_children: true,
         },
-      })
-    },
+      }),
+    }),
     getErrorMessage(error) {
       return error?.response?.data?.error
         || error?.response?.data?.detail

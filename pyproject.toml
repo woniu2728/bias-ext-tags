@@ -40,6 +40,8 @@ include = ["bias_ext_tags*"]
   "frontend/forum/tagModel.js",
   "frontend/forum/tagSearchSource.js",
   "frontend/forum/tagSearchSource.test.js",
+  "frontend/forum/tagListState.js",
+  "frontend/forum/tagListState.test.js",
   "frontend/forum/tagSelectionState.js",
   "frontend/forum/tagSelectionState.test.js",
   "frontend/forum/tagUtils.js",
