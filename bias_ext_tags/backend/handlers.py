@@ -120,6 +120,10 @@ def _tag_object_id(context) -> int:
         return 0
 
 
+def _tag_object_slug(context) -> str:
+    return str(context.get("object_id") or "").strip()
+
+
 def _tag_int_query_value(context, key: str):
     value = _tag_query_value(context, key)
     if value is None or value == "":
@@ -301,7 +305,10 @@ def dispatch_tag_show(context):
     request = context["request"]
     user = context.get("user")
     resource_options = _tag_resource_options(context)
-    tag = _load_visible_tag(TagService.get_tag_by_id(_tag_object_id(context)), user, resource_options)
+    tag = _resolve_tag_route_object(context)
+    if tag is None:
+        return api_error("标签不存在", status=404)
+    tag = _load_visible_tag(tag, user, resource_options)
     if tag is None:
         return api_error("标签不存在", status=404)
     if hasattr(tag, "status_code"):
@@ -313,16 +320,25 @@ def dispatch_tag_show_by_slug(context):
     request = context["request"]
     user = context.get("user")
     resource_options = _tag_resource_options(context)
-    slug = str(context.get("object_id") or "").strip()
-    tag = TagService.get_tag_by_url_slug(slug)
-    if tag is None:
-        tag = TagService.get_tag_by_url_slug(slug, driver="id_with_slug")
+    tag = _resolve_tag_route_object(context)
     tag = _load_visible_tag(tag, user, resource_options)
     if tag is None:
         return api_error("标签不存在", status=404)
     if hasattr(tag, "status_code"):
         return tag
     return _serialize_tag(tag, user=user, include_children=True, resource_options=resource_options)
+
+
+def _resolve_tag_route_object(context):
+    object_slug = _tag_object_slug(context)
+    if object_slug.isdigit():
+        tag = TagService.get_tag_by_id(int(object_slug))
+        if tag is not None:
+            return tag
+    tag = TagService.get_tag_by_url_slug(object_slug)
+    if tag is None:
+        tag = TagService.get_tag_by_url_slug(object_slug, driver="id_with_slug")
+    return tag
 
 
 def dispatch_tag_update(context):

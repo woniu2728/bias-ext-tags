@@ -2043,6 +2043,18 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(response.json()["slug"], "public-tag")
 
+    def test_tag_detail_accepts_slug_on_primary_show_route(self):
+        response = self.client.get("/api/tags/public-tag")
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["id"], self.public_tag.id)
+
+    def test_tag_detail_accepts_id_with_slug_on_primary_show_route(self):
+        response = self.client.get(f"/api/tags/{self.public_tag.id}-renamed")
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["id"], self.public_tag.id)
+
     def test_tag_slug_detail_is_case_insensitive_for_default_slug(self):
         response = self.client.get("/api/tags/slug/PUBLIC-TAG")
 
