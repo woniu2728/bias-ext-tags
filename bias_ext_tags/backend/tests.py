@@ -402,6 +402,41 @@ class TagsExtensionRuntimeTests(ExtensionRuntimeTestMixin, TestCase):
 
         self.assertFalse(can(member, "startDiscussion"))
 
+    def test_tag_global_policy_counts_accessible_child_tags_like_positioned_primary_tags(self):
+        from bias_core.authorization import can
+
+        self.bootstrap_extensions("tags")
+        member = User.objects.create_user(
+            username="tag-global-child-positioned-member",
+            email="tag-global-child-positioned-member@example.com",
+            password="password123",
+        )
+        group = Group.objects.create(name="TagGlobalPositionedChild", color="#4d698e")
+        member.user_groups.add(group)
+        parent = Tag.objects.create(
+            name="全局可访问父标签",
+            slug="global-accessible-parent",
+            position=0,
+            is_restricted=True,
+            start_discussion_scope=Tag.ACCESS_MEMBERS,
+        )
+        child = Tag.objects.create(
+            name="全局可访问子标签",
+            slug="global-accessible-child",
+            parent=parent,
+            position=0,
+            is_restricted=True,
+            start_discussion_scope=Tag.ACCESS_MEMBERS,
+        )
+        Permission.objects.create(group=group, permission=f"tag{parent.id}.startDiscussion")
+        Permission.objects.create(group=group, permission=f"tag{child.id}.startDiscussion")
+        if hasattr(member, "_forum_permission_cache"):
+            delattr(member, "_forum_permission_cache")
+        set_tags_setting("min_primary_tags", 2)
+        set_tags_setting("min_secondary_tags", 0)
+
+        self.assertTrue(can(member, "startDiscussion"))
+
     def test_tag_global_policy_allows_secondary_when_minimums_match(self):
         from bias_core.authorization import can
 

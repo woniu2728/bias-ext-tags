@@ -81,6 +81,14 @@ class TagService:
         return Q(**{f"{prefix}is_primary": False, f"{prefix}parent_id__isnull": True})
 
     @staticmethod
+    def policy_primary_tag_filter(prefix: str = ""):
+        return Q(**{f"{prefix}position__isnull": False})
+
+    @staticmethod
+    def policy_secondary_tag_filter(prefix: str = ""):
+        return Q(**{f"{prefix}position__isnull": True})
+
+    @staticmethod
     def is_primary_tag(tag: Optional[Tag]) -> bool:
         return TagService.is_primary_root_tag(tag)
 
@@ -426,10 +434,10 @@ class TagService:
 
         allowed = TagService.filter_tags_for_user(Tag.objects.all(), user, action=action)
         counts = {
-            "allowed_primary": allowed.filter(TagService.primary_tag_filter()).count(),
-            "allowed_secondary": allowed.filter(TagService.secondary_tag_filter()).count(),
-            "total_primary": Tag.objects.filter(TagService.primary_tag_filter()).count(),
-            "total_secondary": Tag.objects.filter(TagService.secondary_tag_filter()).count(),
+            "allowed_primary": allowed.filter(TagService.policy_primary_tag_filter()).count(),
+            "allowed_secondary": allowed.filter(TagService.policy_secondary_tag_filter()).count(),
+            "total_primary": Tag.objects.filter(TagService.policy_primary_tag_filter()).count(),
+            "total_secondary": Tag.objects.filter(TagService.policy_secondary_tag_filter()).count(),
         }
         cache[cache_key] = counts
         return dict(counts)
