@@ -125,7 +125,7 @@ class TagResource(DatabaseResource):
             .string()
             .writable_when()
             .nullable_field()
-            .validate_with(_validate_tag_color),
+            .hex_color(),
             ResourceField("icon", resolver=lambda tag, context: tag.icon, module_id=EXTENSION_ID)
             .string()
             .writable_when()
@@ -467,14 +467,6 @@ def _set_tag_is_primary(tag, value, context) -> None:
     if value is False:
         tag.position = None
         tag.parent_id = None
-
-
-def _validate_tag_color(value, context) -> None:
-    import re
-
-    if value is None or re.match(r"^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$", value):
-        return
-    raise ValueError("color must be a valid hex color")
 
 
 def _service_payload_from_instance(tag, context, *, creating: bool) -> dict:

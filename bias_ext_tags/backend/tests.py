@@ -2979,6 +2979,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertTrue(any(_resource_field_rule_value(rule)[0] == "unique" for rule in fields["slug"].validation_rules))
         self.assertTrue(fields["color"].writable)
         self.assertTrue(fields["color"].nullable)
+        self.assertTrue(_resource_field_has_rule(fields["color"], "hex_color"))
         self.assertTrue(fields["isHidden"].writable)
         self.assertTrue(fields["isPrimary"].writable)
         self.assertTrue(fields["isRestricted"].writable)
