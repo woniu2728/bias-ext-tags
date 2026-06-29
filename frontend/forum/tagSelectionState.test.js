@@ -15,7 +15,16 @@ const tags = [
     parent_id: null,
     position: 0,
     children: [
-      { id: 11, name: '子一', is_primary: true, parent_id: 1, position: 0 },
+      {
+        id: 11,
+        name: '子一',
+        is_primary: true,
+        parent_id: 1,
+        position: 0,
+        children: [
+          { id: 111, name: '历史孙级', is_primary: true, parent_id: 11, position: 0 },
+        ],
+      },
     ],
   },
   {
@@ -71,7 +80,7 @@ test('tag selection filters child tags whose parent is not selected', () => {
   const state = createTagSelectionState({
     tags,
     primaryTagIds: [1],
-    secondaryTagIds: [11, 21, 3],
+    secondaryTagIds: [11, 111, 21, 3],
     settings: {
       max_secondary_tags: 3,
     },
@@ -79,6 +88,24 @@ test('tag selection filters child tags whose parent is not selected', () => {
 
   assert.deepEqual(state.secondaryOptions.map(tag => tag.id), [11, 3])
   assert.deepEqual(state.selectedSecondaryIds, [11, 3])
+})
+
+test('tag selection ignores legacy grandchildren in flattened choices', () => {
+  const state = createTagSelectionState({
+    tags,
+    primaryTagIds: [1],
+    secondaryTagIds: [111],
+    settings: {
+      max_secondary_tags: 3,
+    },
+  })
+
+  assert.equal(state.secondaryOptions.some(tag => tag.id === 111), false)
+  assert.deepEqual(state.selectedSecondaryIds, [])
+  assert.deepEqual(resolveRequestedSelection(111, tags), {
+    primaryTagIds: [],
+    secondaryTagIds: [],
+  })
 })
 
 test('requested tag selection expands child to parent and child ids', () => {

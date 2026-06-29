@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  flattenTags,
   groupTagsByStructure,
   isChildTag,
   isPrimaryRootTag,
@@ -44,4 +45,34 @@ test('tag structure grouping separates primary, secondary roots and children', (
   assert.deepEqual(grouped.primaryTags[0].children.map(tag => tag.id), [3])
   assert.deepEqual(grouped.secondaryTags.map(tag => tag.id), [5, 4])
   assert.deepEqual(grouped.childTags.map(tag => tag.id), [3])
+})
+
+test('tag structure grouping ignores legacy grandchildren', () => {
+  const tags = [{
+    id: 1,
+    name: '主',
+    is_primary: true,
+    parent_id: null,
+    position: 0,
+    children: [{
+      id: 2,
+      name: '子',
+      is_primary: true,
+      parent_id: 1,
+      position: 0,
+      children: [{
+        id: 3,
+        name: '历史孙级',
+        is_primary: true,
+        parent_id: 2,
+        position: 0,
+      }],
+    }],
+  }]
+
+  assert.deepEqual(flattenTags(tags).map(tag => tag.id), [1, 2])
+  const grouped = groupTagsByStructure(tags)
+  assert.deepEqual(grouped.primaryTags.map(tag => tag.id), [1])
+  assert.deepEqual(grouped.primaryTags[0].children.map(tag => tag.id), [2])
+  assert.deepEqual(grouped.childTags.map(tag => tag.id), [2])
 })

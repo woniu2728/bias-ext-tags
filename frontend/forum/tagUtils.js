@@ -19,7 +19,7 @@ export function normalizeTag(tag = {}) {
 export function flattenTags(tags) {
   return unwrapTagList(tags).flatMap(tag => {
     const normalized = normalizeTag(tag)
-    return [normalized, ...flattenTags(normalized.children)]
+    return [normalized, ...normalized.children]
   })
 }
 
