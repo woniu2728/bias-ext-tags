@@ -7,11 +7,15 @@ from bias_ext_tags.backend.models import Tag
 
 def tag_endpoint_specs() -> tuple[dict, ...]:
     from bias_ext_tags.backend.handlers import (
-        dispatch_tag_index,
         dispatch_tag_popular,
         dispatch_tag_show_by_slug,
     )
-    from bias_ext_tags.backend.handlers import core_delete_tag_response, core_show_tag_response, core_write_tag_response
+    from bias_ext_tags.backend.handlers import (
+        core_delete_tag_response,
+        core_index_tag_response,
+        core_show_tag_response,
+        core_write_tag_response,
+    )
 
     return (
         {
@@ -27,11 +31,13 @@ def tag_endpoint_specs() -> tuple[dict, ...]:
         },
         {
             "name": "index",
-            "handler": dispatch_tag_index,
             "methods": ("GET",),
             "path": "/tags",
             "absolute_path": True,
+            "kind": "index",
             "default_include": ("parent",),
+            "response_callback": core_index_tag_response,
+            "response_callback_only": True,
         },
         {
             "name": "popular",
@@ -207,14 +213,83 @@ class TagResource(DatabaseResource):
         ]
 
     def query(self, context):
-        return Tag.objects.select_related("last_posted_discussion", "parent")
+        from django.db.models import Prefetch, Q
+
+        from bias_ext_tags.backend.handlers import (
+            _can_include_hidden_tags,
+            _tag_bool_query_value,
+            _tag_current_discussion_tag_ids,
+            _tag_int_query_value,
+            _tag_purpose_query_value,
+            _tag_resource_options,
+        )
+        from bias_ext_tags.backend.services import TagService
+
+        user = context.get("user")
+        purpose = _tag_purpose_query_value(context)
+        resource_options = _tag_resource_options(context)
+        include_hidden = _tag_bool_query_value(context, "include_hidden", False)
+        include_children = _tag_bool_query_value(context, "include_children", True)
+        children_requested = include_children or "children" in resource_options.includes
+        discussion_tag_ids = _tag_current_discussion_tag_ids(context) if purpose == "add_to_discussion" else ()
+
+        if include_hidden and not _can_include_hidden_tags(user):
+            include_hidden = False
+
+        context["action"] = purpose
+        context["resource_options"] = resource_options
+        context["include_hidden"] = include_hidden
+        context["include_children"] = include_children
+        context["children_requested"] = children_requested
+        context["discussion_tag_ids"] = discussion_tag_ids
+
+        queryset = Tag.objects.select_related("last_posted_discussion", "parent").all()
+        if children_requested:
+            visible_child_queryset = Tag.objects.select_related("last_posted_discussion").order_by(*TagService.child_order_by())
+            if not include_hidden:
+                visible_child_queryset = visible_child_queryset.filter(is_hidden=False)
+            visible_child_queryset = TagService.filter_tags_for_user(visible_child_queryset, user, action=purpose)
+            if discussion_tag_ids:
+                visible_child_queryset = visible_child_queryset | Tag.objects.filter(id__in=discussion_tag_ids)
+            queryset = queryset.prefetch_related(
+                Prefetch("children", queryset=visible_child_queryset, to_attr="visible_children")
+            )
+
+        parent_id = _tag_int_query_value(context, "parent_id")
+        if parent_id is None:
+            queryset = queryset.filter(parent__isnull=True)
+        else:
+            queryset = queryset.filter(parent_id=parent_id)
+        if not include_hidden:
+            queryset = queryset.filter(is_hidden=False)
+        queryset = TagService.filter_tags_for_user(queryset, user, action=purpose)
+        if discussion_tag_ids:
+            queryset = queryset | Tag.objects.filter(
+                Q(id__in=discussion_tag_ids) | Q(children__id__in=discussion_tag_ids)
+            )
+        context["tag_index_scope_applied"] = True
+        return queryset
 
     def scope(self, queryset, context):
         from bias_ext_tags.backend.services import TagService
 
+        if context.get("tag_index_scope_applied"):
+            return queryset
         action = context.get("action") or context.get("purpose") or "view"
         user = context.get("user")
         return TagService.filter_tags_for_user(queryset, user, action=action)
+
+    def results(self, queryset, context):
+        from bias_ext_tags.backend.handlers import _apply_tag_resource_preloads
+        from bias_ext_tags.backend.services import TagService
+
+        queryset = _apply_tag_resource_preloads(
+            queryset.distinct(),
+            user=context.get("user"),
+            action=context.get("action") or "view",
+            resource_options=context.get("resource_options"),
+        )
+        return list(queryset.order_by(*TagService.structure_order_by()))
 
     def find(self, object_id: str, context):
         from bias_ext_tags.backend.services import TagService

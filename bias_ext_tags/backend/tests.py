@@ -2747,7 +2747,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
             for endpoint in registry.get_dispatch_endpoints("tag")
         }
 
-        self.assertIn(("index", "/tags", True), routes)
+        self.assertIn(("index", "/tags", False), routes)
         self.assertIn(("show", "/tags/{object_id}", False), routes)
         self.assertIn(("create", "/tags", False), routes)
         self.assertIn(("update", "/tags/{object_id}", False), routes)
@@ -2757,6 +2757,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
             for endpoint in registry.get_dispatch_endpoints("tag")
         }
         self.assertEqual(endpoints["create"].kind, "create")
+        self.assertEqual(endpoints["index"].kind, "index")
         self.assertEqual(endpoints["update"].kind, "update")
 
     def test_tag_resource_object_owns_flarum_writable_field_contract(self):

@@ -483,6 +483,34 @@ def core_show_tag_response(context, response):
     return _serialize_tag(tag, user=user, include_children=True, resource_options=resource_options)
 
 
+def core_index_tag_response(context, response):
+    user = context.get("user")
+    tags = list(context.get("result") or [])
+    resource_options = _tag_resource_options(context)
+    action = context.get("action") or "view"
+    if _wants_jsonapi_response(context):
+        jsonapi_response = _jsonapi_tags_response(tags, context, action=action)
+        if jsonapi_response is not None:
+            return jsonapi_response
+        return response
+
+    serialize_context = _build_tag_serialize_context(user, action=action)
+    serialize_context["include_hidden"] = bool(context.get("include_hidden"))
+    return {
+        "data": [
+            _serialize_tag(
+                tag,
+                user=user,
+                include_children=bool(context.get("include_children", True)),
+                action=action,
+                context=serialize_context,
+                resource_options=resource_options,
+            )
+            for tag in tags
+        ]
+    }
+
+
 def core_write_tag_response(context, response):
     tag = context.get("result")
     if _wants_jsonapi_response(context):
