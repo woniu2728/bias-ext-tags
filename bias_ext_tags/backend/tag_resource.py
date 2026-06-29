@@ -223,25 +223,25 @@ class TagResource(DatabaseResource):
     def query(self, context):
         from django.db.models import Prefetch, Q
 
-        from bias_ext_tags.backend.resource_endpoints import (
-            _can_include_hidden_tags,
-            _tag_bool_query_value,
-            _tag_current_discussion_tag_ids,
-            _tag_int_query_value,
-            _tag_purpose_query_value,
-            _tag_resource_options,
+        from bias_ext_tags.backend.query_params import (
+            can_include_hidden_tags,
+            tag_bool_query_value,
+            tag_current_discussion_tag_ids,
+            tag_int_query_value,
+            tag_purpose_query_value,
+            tag_resource_options,
         )
         from bias_ext_tags.backend.services import TagService
 
         user = context.get("user")
-        purpose = _tag_purpose_query_value(context)
-        resource_options = _tag_resource_options(context)
-        include_hidden = _tag_bool_query_value(context, "include_hidden", False)
-        include_children = _tag_bool_query_value(context, "include_children", True)
+        purpose = tag_purpose_query_value(context)
+        resource_options = tag_resource_options(context)
+        include_hidden = tag_bool_query_value(context, "include_hidden", False)
+        include_children = tag_bool_query_value(context, "include_children", True)
         children_requested = include_children or "children" in resource_options.includes
-        discussion_tag_ids = _tag_current_discussion_tag_ids(context) if purpose == "add_to_discussion" else ()
+        discussion_tag_ids = tag_current_discussion_tag_ids(context) if purpose == "add_to_discussion" else ()
 
-        if include_hidden and not _can_include_hidden_tags(user):
+        if include_hidden and not can_include_hidden_tags(user):
             include_hidden = False
 
         context["action"] = purpose
@@ -264,7 +264,7 @@ class TagResource(DatabaseResource):
                 Prefetch("children", queryset=visible_child_queryset, to_attr="visible_children")
             )
 
-        parent_id = _tag_int_query_value(context, "parent_id")
+        parent_id = tag_int_query_value(context, "parent_id")
         if parent_id is None:
             queryset = queryset.filter(parent__isnull=True)
         else:
