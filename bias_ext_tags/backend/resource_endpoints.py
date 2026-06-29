@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from django.http import JsonResponse
-
-from bias_core.extensions.platform import ResourceQueryOptions, parse_resource_query_options
+from bias_core.extensions.platform import ResourceQueryOptions, jsonapi_response, parse_resource_query_options, wants_jsonapi_response
 from bias_core.extensions.platform import merge_resource_includes
 from bias_ext_tags.backend.models import Tag
 from bias_ext_tags.backend.services import TagService
@@ -94,9 +92,7 @@ def _serialize_tag(
 
 
 def _wants_jsonapi_response(context) -> bool:
-    request = context.get("request")
-    accept = str(getattr(request, "META", {}).get("HTTP_ACCEPT", "") or "")
-    return "application/vnd.api+json" in accept.lower()
+    return wants_jsonapi_response(context)
 
 
 def _jsonapi_serialize_context(context, *, action="view") -> dict:
@@ -124,11 +120,7 @@ def _jsonapi_tag_response(tag, context, *, action="view", status=200):
         only=resource_options.fields,
         include=resource_options.includes,
     )
-    return JsonResponse(
-        document,
-        status=status,
-        content_type="application/vnd.api+json",
-    )
+    return jsonapi_response(document, status=status)
 
 
 def _jsonapi_tags_response(tags, context, *, action="view"):
@@ -143,10 +135,7 @@ def _jsonapi_tags_response(tags, context, *, action="view"):
         include=resource_options.includes,
         many=True,
     )
-    return JsonResponse(
-        document,
-        content_type="application/vnd.api+json",
-    )
+    return jsonapi_response(document)
 
 
 def _apply_tag_resource_preloads(queryset, user=None, action="view", resource_options=None):
@@ -252,10 +241,7 @@ def core_show_tag_response(context, response):
     resource_options = _tag_resource_options(context)
     if _wants_jsonapi_response(context):
         if isinstance(response, dict):
-            return JsonResponse(
-                response,
-                content_type="application/vnd.api+json",
-            )
+            return jsonapi_response(response)
         return response
     return _serialize_tag(tag, user=user, include_children=True, resource_options=resource_options)
 
@@ -293,16 +279,9 @@ def core_write_tag_response(context, response):
     if _wants_jsonapi_response(context):
         if isinstance(response, tuple):
             status, payload = response
-            return JsonResponse(
-                payload,
-                status=status,
-                content_type="application/vnd.api+json",
-            )
+            return jsonapi_response(payload, status=status)
         if isinstance(response, dict):
-            return JsonResponse(
-                response,
-                content_type="application/vnd.api+json",
-            )
+            return jsonapi_response(response)
         return response
     return _serialize_tag(tag, user=context.get("user"), include_children=True)
 

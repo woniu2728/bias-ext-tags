@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from bias_core.extensions import DatabaseResource, ResourceEndpoint, ResourceField, ResourceRelationship
+from bias_core.extensions.platform import wants_jsonapi_response
 from bias_ext_tags.backend.constants import EXTENSION_ID
 from bias_ext_tags.backend.models import Tag
 
@@ -429,9 +430,7 @@ def _resolve_tag_last_posted_discussion_summary(tag, context):
 
 
 def _plain_tag_response_visible(tag, context) -> bool:
-    request = context.get("request") if isinstance(context, dict) else None
-    accept = str(getattr(request, "META", {}).get("HTTP_ACCEPT", "") or "")
-    return "application/vnd.api+json" not in accept.lower()
+    return not wants_jsonapi_response(context)
 
 
 def _tag_restriction_writable(tag, context) -> bool:
