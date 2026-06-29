@@ -1948,13 +1948,25 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
                 parent=self.public_tag,
                 position=index,
             )
+        second_parent = Tag.objects.create(name="第二批量父标签", slug="relationship-second-parent")
+        Tag.objects.create(
+            name="第二批量子标签",
+            slug="relationship-second-child",
+            parent=second_parent,
+        )
 
-        with CaptureQueriesContext(connection) as queries:
+        with patch(
+            "bias_ext_tags.backend.services.TagService.get_forbidden_tag_ids",
+            wraps=TagService.get_forbidden_tag_ids,
+        ) as get_forbidden_tag_ids, CaptureQueriesContext(connection) as queries:
             response = self.client.get("/api/tags", {"include": "children"})
 
         self.assertEqual(response.status_code, 200, response.content)
         public_tag = next(tag for tag in response.json()["data"] if tag["slug"] == self.public_tag.slug)
+        second_parent_payload = next(tag for tag in response.json()["data"] if tag["slug"] == second_parent.slug)
         self.assertEqual(len(public_tag["children"]), 5)
+        self.assertEqual([tag["slug"] for tag in second_parent_payload["children"]], ["relationship-second-child"])
+        get_forbidden_tag_ids.assert_called_once()
         per_parent_child_queries = [
             query["sql"]
             for query in queries

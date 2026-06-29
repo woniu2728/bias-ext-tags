@@ -438,6 +438,7 @@ def resolve_tag_children(tag, context: dict) -> list[Tag]:
         from bias_ext_tags.backend.services import TagService
 
         forbidden_tag_ids = set(TagService.get_forbidden_tag_ids(context.get("user"), action=context.get("action", "view")))
+        context["forbidden_tag_ids"] = forbidden_tag_ids
     return [
         child
         for child in children

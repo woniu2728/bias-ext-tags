@@ -30,6 +30,8 @@ def _tag_resource_options(context, resource: str = "tag") -> ResourceQueryOption
 
 def _build_tag_serialize_context(user=None, action="view"):
     return {
+        "user": user,
+        "action": action,
         "forbidden_tag_ids": None,
     }
 
@@ -55,11 +57,13 @@ def _serialize_tag(
     resource_options=None,
 ):
     context = context or _build_tag_serialize_context(user, action=action)
+    context.setdefault("user", user)
+    context.setdefault("action", action)
     resource_options = resource_options or ResourceQueryOptions()
     payload = _get_resource_registry().serialize(
         "tag",
         tag,
-        {"user": user, "action": action, **context},
+        context,
         only=resource_options.fields,
         include=resource_options.includes,
     )
