@@ -3144,6 +3144,42 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
             "Discussion list tag serialization should reuse prefetched tag links instead of querying per discussion.",
         )
 
+    def test_discussion_list_default_includes_tag_parent_relationship(self):
+        parent = Tag.objects.create(name="讨论默认父标签", slug="discussion-default-parent", position=1)
+        child = Tag.objects.create(
+            name="讨论默认子标签",
+            slug="discussion-default-child",
+            parent=parent,
+            position=None,
+            is_primary=False,
+        )
+        discussion = create_runtime_discussion(
+            title="Discussion default tag parent include",
+            content="用于验证讨论列表默认展开 tags.parent。",
+            user=self.author,
+            extension_payload=discussion_tags_payload([parent.id, child.id]),
+        )
+
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get("/api/discussions/")
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = next(item for item in response.json()["data"] if item["id"] == discussion.id)
+        child_payload = next(item for item in payload["tags"] if item["id"] == child.id)
+        self.assertEqual(child_payload["parent"]["id"], parent.id)
+        self.assertEqual(child_payload["parent"]["slug"], parent.slug)
+        per_tag_parent_queries = [
+            query["sql"]
+            for query in queries
+            if 'from "tags"' in query["sql"].lower()
+            and f'"tags"."id" = {parent.id}' in query["sql"]
+        ]
+        self.assertEqual(
+            per_tag_parent_queries,
+            [],
+            "Discussion list tags.parent default include should prefetch tag parents.",
+        )
+
     def test_post_list_nested_discussion_tags_include_uses_prefetched_links(self):
         tags = [
             Tag.objects.create(

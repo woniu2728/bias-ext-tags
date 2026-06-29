@@ -47,7 +47,7 @@ def discussion_resource_field_definitions():
             module_id=EXTENSION_ID,
             resolver=resolve_discussion_tags,
             description="讨论关联的标签列表。",
-            prefetch_related=("discussion_tags__tag",),
+            prefetch_related=("discussion_tags__tag", "discussion_tags__tag__parent"),
         ),
     )
 
@@ -60,9 +60,9 @@ def discussion_resource_relationship_definitions():
             resource="discussion",
             relationship="tags",
             module_id=EXTENSION_ID,
-            resolver=resolve_discussion_tags,
+            resolver=resolve_discussion_tag_resources,
             description="讨论关联标签关系。",
-            prefetch_related=("discussion_tags__tag",),
+            prefetch_related=("discussion_tags__tag", "discussion_tags__tag__parent"),
             resource_type="tag",
             many=True,
             writable=True,
@@ -321,6 +321,12 @@ def resolve_discussion_tags(discussion, context: dict) -> list[dict]:
     from bias_ext_tags.backend.tag_relationships import serialize_discussion_tag_summaries
 
     return serialize_discussion_tag_summaries(discussion)
+
+
+def resolve_discussion_tag_resources(discussion, context: dict) -> list[Tag]:
+    from bias_ext_tags.backend.tag_relationships import get_discussion_tags
+
+    return get_discussion_tags(discussion)
 
 
 def resolve_forum_tags(forum, context: dict) -> list[dict]:
