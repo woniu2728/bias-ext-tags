@@ -239,10 +239,6 @@ def core_show_tag_response(context, response):
     user = context.get("user")
     tag = context.get("result")
     resource_options = _tag_resource_options(context)
-    if _wants_jsonapi_response(context):
-        if isinstance(response, dict):
-            return jsonapi_response(response)
-        return response
     return _serialize_tag(tag, user=user, include_children=True, resource_options=resource_options)
 
 
@@ -251,11 +247,6 @@ def core_index_tag_response(context, response):
     tags = list(context.get("result") or [])
     resource_options = _tag_resource_options(context)
     action = context.get("action") or "view"
-    if _wants_jsonapi_response(context):
-        jsonapi_response = _jsonapi_tags_response(tags, context, action=action)
-        if jsonapi_response is not None:
-            return jsonapi_response
-        return response
 
     serialize_context = _build_tag_serialize_context(user, action=action)
     serialize_context["include_hidden"] = bool(context.get("include_hidden"))
@@ -276,18 +267,9 @@ def core_index_tag_response(context, response):
 
 def core_write_tag_response(context, response):
     tag = context.get("result")
-    if _wants_jsonapi_response(context):
-        if isinstance(response, tuple):
-            status, payload = response
-            return jsonapi_response(payload, status=status)
-        if isinstance(response, dict):
-            return jsonapi_response(response)
-        return response
     return _serialize_tag(tag, user=context.get("user"), include_children=True)
 
 
 def core_delete_tag_response(context, response):
-    if _wants_jsonapi_response(context):
-        return response
     return {"message": "标签已删除"}
 

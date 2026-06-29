@@ -2796,7 +2796,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
     def test_tag_detail_static_route_uses_resource_endpoint_mutator(self):
         def mutate_endpoint(endpoint):
             def response_callback(context, response):
-                callback = endpoint.response_callback
+                callback = endpoint.plain_response_callback
                 payload = callback(context, response) if callback is not None else response
                 payload["mutated_by_resource_endpoint"] = True
                 return payload
@@ -2809,7 +2809,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
                 kind=endpoint.kind,
                 ability=endpoint.ability,
                 methods=endpoint.methods,
-                response_callback=response_callback,
+                plain_response_callback=response_callback,
             )
 
         registry = ResourceRegistry()
@@ -2836,7 +2836,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
     def test_tag_slug_detail_static_route_uses_resource_endpoint_mutator(self):
         def mutate_endpoint(endpoint):
             def response_callback(context, response):
-                callback = endpoint.response_callback
+                callback = endpoint.plain_response_callback
                 payload = callback(context, response) if callback is not None else response
                 payload["mutated_by_resource_endpoint"] = True
                 return payload
@@ -2849,7 +2849,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
                 kind=endpoint.kind,
                 ability=endpoint.ability,
                 methods=endpoint.methods,
-                response_callback=response_callback,
+                plain_response_callback=response_callback,
             )
 
         registry = ResourceRegistry()
@@ -2919,6 +2919,13 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(endpoints["show-by-slug"].kind, "show")
         self.assertEqual(endpoints["show-by-slug"].ability, "view")
         self.assertEqual(endpoints["update"].kind, "update")
+        self.assertIsNone(endpoints["index"].response_callback)
+        self.assertFalse(endpoints["index"].response_callback_only)
+        self.assertTrue(callable(endpoints["index"].plain_response_callback))
+        self.assertTrue(callable(endpoints["show"].plain_response_callback))
+        self.assertTrue(callable(endpoints["create"].plain_response_callback))
+        self.assertTrue(callable(endpoints["update"].plain_response_callback))
+        self.assertTrue(callable(endpoints["delete"].plain_response_callback))
 
     def test_tag_resource_object_owns_flarum_writable_field_contract(self):
         registry = ResourceRegistry()

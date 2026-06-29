@@ -27,7 +27,7 @@ def tag_endpoint_specs() -> tuple[dict, ...]:
             "ability": "create",
             "kind": "create",
             "forum_permission": "tag.create",
-            "response_callback": core_write_tag_response,
+            "plain_response_callback": core_write_tag_response,
         },
         {
             "name": "index",
@@ -36,8 +36,7 @@ def tag_endpoint_specs() -> tuple[dict, ...]:
             "absolute_path": True,
             "kind": "index",
             "default_include": ("parent",),
-            "response_callback": core_index_tag_response,
-            "response_callback_only": True,
+            "plain_response_callback": core_index_tag_response,
         },
         {
             "name": "popular",
@@ -53,7 +52,7 @@ def tag_endpoint_specs() -> tuple[dict, ...]:
             "absolute_path": True,
             "ability": "view",
             "kind": "show",
-            "response_callback": core_show_tag_response,
+            "plain_response_callback": core_show_tag_response,
         },
         {
             "name": "show-by-slug",
@@ -62,7 +61,7 @@ def tag_endpoint_specs() -> tuple[dict, ...]:
             "absolute_path": True,
             "ability": "view",
             "kind": "show",
-            "response_callback": core_show_tag_response,
+            "plain_response_callback": core_show_tag_response,
         },
         {
             "name": "update",
@@ -73,7 +72,7 @@ def tag_endpoint_specs() -> tuple[dict, ...]:
             "ability": "edit",
             "kind": "update",
             "forum_permission": "tag.edit",
-            "response_callback": core_write_tag_response,
+            "plain_response_callback": core_write_tag_response,
         },
         {
             "name": "delete",
@@ -83,7 +82,7 @@ def tag_endpoint_specs() -> tuple[dict, ...]:
             "auth_required": True,
             "ability": "delete",
             "kind": "delete",
-            "response_callback": core_delete_tag_response,
+            "plain_response_callback": core_delete_tag_response,
         },
     )
 
