@@ -2099,9 +2099,31 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         )
 
         self.assertEqual(response.status_code, 200, response.content)
-        self.assertIsNone(response.json()["parent_id"])
         tag.refresh_from_db()
         self.assertIsNone(tag.parent_id)
+
+    def test_tag_create_accepts_jsonapi_payload_without_type_like_single_resource_collection(self):
+        response = self.client.post(
+            "/api/tags",
+            data=json.dumps({
+                "data": {
+                    "attributes": {
+                        "name": "省略类型标签",
+                        "slug": "missing-type-tag",
+                        "isPrimary": True,
+                    },
+                    "relationships": {
+                        "parent": {"data": {"type": "tags", "id": str(self.public_tag.id)}},
+                    },
+                },
+            }),
+            content_type="application/json",
+            **self.auth_header(self.admin),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        tag = Tag.objects.get(slug="missing-type-tag")
+        self.assertEqual(tag.parent_id, self.public_tag.id)
 
     def test_tag_create_and_update_accept_camel_case_attributes_like_flarum(self):
         response = self.client.post(
