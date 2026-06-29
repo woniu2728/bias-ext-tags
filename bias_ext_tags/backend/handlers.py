@@ -33,6 +33,9 @@ def _build_tag_serialize_context(user=None, action="view"):
         "user": user,
         "action": action,
         "forbidden_tag_ids": None,
+        "plain_related_fields": {
+            "discussion": ("id", "title", "slug", "last_post_number", "last_posted_at"),
+        },
     }
 
 

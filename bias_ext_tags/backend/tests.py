@@ -1862,6 +1862,8 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertIn("can_reply", payload)
         self.assertIn("last_posted_discussion", payload)
         self.assertEqual(payload["last_posted_discussion"]["id"], discussion.id)
+        self.assertEqual(payload["last_posted_discussion"]["last_post_number"], discussion.last_post_number)
+        self.assertNotIn("user", payload["last_posted_discussion"])
 
     def test_tag_detail_supports_parent_and_children_resource_includes(self):
         visible_child = Tag.objects.create(

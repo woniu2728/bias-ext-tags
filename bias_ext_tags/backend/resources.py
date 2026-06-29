@@ -180,9 +180,10 @@ def tag_resource_relationship_definitions():
             resource="tag",
             relationship="last_posted_discussion",
             module_id=EXTENSION_ID,
-            resolver=resolve_tag_last_posted_discussion,
-            description="标签下最后活跃讨论摘要。",
+            resolver=resolve_tag_last_posted_discussion_resource,
+            description="标签下最后活跃讨论资源。",
             select_related=("last_posted_discussion",),
+            resource_type="discussion",
         ),
     )
 
@@ -436,6 +437,10 @@ def resolve_tag_last_posted_discussion(tag, context: dict) -> dict | None:
         "last_post_number": discussion.last_post_number,
         "last_posted_at": discussion.last_posted_at,
     }
+
+
+def resolve_tag_last_posted_discussion_resource(tag, context: dict):
+    return getattr(tag, "last_posted_discussion", None)
 
 
 def resolve_tag_parent(tag, context: dict):
