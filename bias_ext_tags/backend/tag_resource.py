@@ -150,9 +150,7 @@ class TagResource(DatabaseResource):
             .nullable_field(),
             ResourceField("defaultSort", resolver=lambda tag, context: tag.default_sort, module_id=EXTENSION_ID)
             .string()
-            .writable_when()
-            .nullable_field()
-            .set_with(_set_tag_default_sort),
+            .nullable_field(),
             ResourceField("isChild", resolver=lambda tag, context: bool(tag.parent_id), module_id=EXTENSION_ID)
             .boolean(),
             ResourceField("lastPostedAt", resolver=lambda tag, context: tag.last_posted_at, module_id=EXTENSION_ID),

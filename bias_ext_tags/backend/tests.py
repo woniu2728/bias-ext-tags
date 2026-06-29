@@ -2113,7 +2113,6 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
                     "attributes": {
                         "name": "Camel 标签",
                         "slug": "camel-tag",
-                        "defaultSort": "latest",
                         "isHidden": True,
                         "isPrimary": False,
                     },
@@ -2125,8 +2124,8 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
 
         self.assertEqual(response.status_code, 200, response.content)
         payload = response.json()
-        self.assertEqual(payload["default_sort"], "latest")
-        self.assertEqual(payload["defaultSort"], "latest")
+        self.assertIsNone(payload["default_sort"])
+        self.assertIsNone(payload["defaultSort"])
         self.assertTrue(payload["is_hidden"])
         self.assertTrue(payload["isHidden"])
         self.assertFalse(payload["is_primary"])
@@ -2141,7 +2140,6 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
                 "data": {
                     "type": "tag",
                     "attributes": {
-                        "defaultSort": "top",
                         "isHidden": False,
                         "isPrimary": True,
                         "isRestricted": True,
@@ -2155,17 +2153,55 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
 
         self.assertEqual(response.status_code, 200, response.content)
         payload = response.json()
-        self.assertEqual(payload["defaultSort"], "top")
+        self.assertIsNone(payload["defaultSort"])
         self.assertFalse(payload["isHidden"])
         self.assertTrue(payload["isPrimary"])
         self.assertTrue(payload["isRestricted"])
         self.assertEqual(payload["parent_id"], self.public_tag.id)
         tag.refresh_from_db()
-        self.assertEqual(tag.default_sort, "top")
+        self.assertIsNone(tag.default_sort)
         self.assertFalse(tag.is_hidden)
         self.assertTrue(tag.is_primary)
         self.assertTrue(tag.is_restricted)
         self.assertEqual(tag.parent_id, self.public_tag.id)
+
+    def test_tag_api_rejects_read_only_flarum_default_sort_attribute(self):
+        create_response = self.client.post(
+            "/api/tags",
+            data=json.dumps({
+                "data": {
+                    "type": "tag",
+                    "attributes": {
+                        "name": "默认排序 JSONAPI",
+                        "slug": "default-sort-jsonapi",
+                        "defaultSort": "latest",
+                    },
+                },
+            }),
+            content_type="application/json",
+            **self.auth_header(self.admin),
+        )
+
+        self.assertEqual(create_response.status_code, 403, create_response.content)
+        self.assertFalse(Tag.objects.filter(slug="default-sort-jsonapi").exists())
+
+        update_response = self.client.patch(
+            f"/api/tags/{self.public_tag.id}",
+            data=json.dumps({
+                "data": {
+                    "type": "tag",
+                    "attributes": {
+                        "defaultSort": "top",
+                    },
+                },
+            }),
+            content_type="application/json",
+            **self.auth_header(self.admin),
+        )
+
+        self.assertEqual(update_response.status_code, 403, update_response.content)
+        self.public_tag.refresh_from_db()
+        self.assertIsNone(self.public_tag.default_sort)
 
     def test_tag_create_rejects_flarum_update_only_is_restricted_attribute(self):
         response = self.client.post(
@@ -2983,7 +3019,9 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertTrue(fields["isHidden"].writable)
         self.assertTrue(fields["isPrimary"].writable)
         self.assertTrue(fields["isRestricted"].writable)
-        self.assertTrue(fields["defaultSort"].writable)
+        self.assertFalse(fields["defaultSort"].writable)
+        self.assertTrue(fields["defaultSort"].nullable)
+        self.assertTrue(fields["default_sort"].writable)
         self.assertTrue(fields["parent_id"].writable)
         self.assertTrue(fields["parentId"].writable)
         self.assertEqual(TagResource().jsonapi_types(), ("tag", "tags"))
@@ -3013,7 +3051,6 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
                         "icon": None,
                         "isHidden": True,
                         "isPrimary": True,
-                        "defaultSort": "latest",
                     },
                     "relationships": {
                         "parent": {"data": {"type": "tag", "id": str(self.public_tag.id)}},
@@ -3033,7 +3070,6 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
                 "icon": None,
                 "isHidden": True,
                 "isPrimary": True,
-                "defaultSort": "latest",
             },
             context,
             creating=True,
@@ -3046,7 +3082,6 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertIsNone(tag.icon)
         self.assertTrue(tag.is_hidden)
         self.assertTrue(tag.is_primary)
-        self.assertEqual(tag.default_sort, "latest")
         self.assertEqual(tag.parent_id, self.public_tag.id)
 
     def test_tag_resource_payload_validates_flarum_schema_rules(self):
@@ -3110,6 +3145,23 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
                         "data": {
                             "type": "tag",
                             "attributes": {"name": "Color", "slug": "color", "color": "red"},
+                        },
+                    },
+                },
+                creating=True,
+            )
+
+        with self.assertRaisesMessage(JsonApiForbidden, "字段不可写: defaultSort"):
+            registry.apply_resource_payload(
+                "tag",
+                Tag(),
+                {"name": "Default Sort", "slug": "default-sort", "defaultSort": "latest"},
+                {
+                    "user": self.admin,
+                    "payload": {
+                        "data": {
+                            "type": "tag",
+                            "attributes": {"name": "Default Sort", "slug": "default-sort", "defaultSort": "latest"},
                         },
                     },
                 },
