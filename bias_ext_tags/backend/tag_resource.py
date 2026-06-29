@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from bias_core.extensions import DatabaseResource, ResourceEndpoint, ResourceField, ResourceRelationship
-from bias_core.extensions.platform import wants_jsonapi_response
 from bias_ext_tags.backend.constants import EXTENSION_ID
 from bias_ext_tags.backend.models import Tag
 
@@ -157,7 +156,7 @@ class TagResource(DatabaseResource):
             .boolean(),
             ResourceField("lastPostedAt", resolver=lambda tag, context: tag.last_posted_at, module_id=EXTENSION_ID),
             ResourceField("lastPostedDiscussion", resolver=_resolve_tag_last_posted_discussion_summary, module_id=EXTENSION_ID)
-            .visible_when(_plain_tag_response_visible),
+            .plain_only(),
             ResourceField("canStartDiscussion", resolver=_resolve_tag_can_start_discussion, module_id=EXTENSION_ID)
             .boolean(),
             ResourceField("canAddToDiscussion", resolver=_resolve_tag_can_add_to_discussion, module_id=EXTENSION_ID)
@@ -426,10 +425,6 @@ def _resolve_tag_last_posted_discussion_summary(tag, context):
     from bias_ext_tags.backend.resources import resolve_tag_last_posted_discussion
 
     return resolve_tag_last_posted_discussion(tag, context)
-
-
-def _plain_tag_response_visible(tag, context) -> bool:
-    return not wants_jsonapi_response(context)
 
 
 def _tag_restriction_writable(tag, context) -> bool:
