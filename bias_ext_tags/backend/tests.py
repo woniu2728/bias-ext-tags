@@ -2976,6 +2976,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertTrue(fields["slug"].required_on_create)
         self.assertTrue(_resource_field_has_rule(fields["slug"], ("max_length", 100)))
         self.assertTrue(any(_resource_field_rule_value(rule)[0] == "regex" for rule in fields["slug"].validation_rules))
+        self.assertTrue(any(_resource_field_rule_value(rule)[0] == "unique" for rule in fields["slug"].validation_rules))
         self.assertTrue(fields["color"].writable)
         self.assertTrue(fields["color"].nullable)
         self.assertTrue(fields["isHidden"].writable)

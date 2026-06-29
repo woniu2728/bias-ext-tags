@@ -116,6 +116,7 @@ class TagResource(DatabaseResource):
             .writable_when()
             .required_on_create_field()
             .max_length(100)
+            .unique(Tag, "slug")
             .regex(r"^[^/\\ ]*$"),
             ResourceField("storedSlug", resolver=lambda tag, context: tag.slug, module_id=EXTENSION_ID)
             .string()
