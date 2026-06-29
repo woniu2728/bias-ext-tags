@@ -9,10 +9,10 @@
   "dependencies": [
     "core",
     "users",
-    "content",
-    "discussions"
+    "content"
   ],
   "optional_dependencies": [
+    "discussions",
     "posts",
     "flags"
   ],

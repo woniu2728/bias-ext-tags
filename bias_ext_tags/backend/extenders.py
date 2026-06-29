@@ -19,6 +19,7 @@ from bias_core.extensions import (
     SearchDriverExtender,
     ServiceProviderExtender,
     SettingsExtender,
+    RuntimeModel,
 )
 
 from bias_ext_tags.backend.admin_api import router as admin_tags_router
@@ -40,7 +41,7 @@ from bias_ext_tags.backend.forum_contracts import (
     post_type_definitions,
     search_filter_definitions,
 )
-from bias_ext_tags.backend.frontend import frontend_extender
+from bias_ext_tags.backend.frontend import discussion_frontend_extender, frontend_extender
 from bias_ext_tags.backend.listeners import (
     enrich_realtime_tags_included_payload,
     post_event_listener_definitions,
@@ -77,6 +78,7 @@ from bias_ext_tags.backend.resources import (
 )
 from bias_ext_tags.backend.runtime import tag_service_provider
 from bias_ext_tags.backend.runtime_models import DISCUSSION_MODEL, POST_MODEL
+from bias_ext_tags.backend.services import TagService
 from bias_ext_tags.backend.search_contracts import search_driver_definitions
 from bias_ext_tags.backend.search_targets import tag_search_target_provider
 from bias_ext_tags.backend.settings import setting_field_definitions
@@ -224,8 +226,32 @@ def event_extenders():
 
 def optional_integration_extenders():
     return (
+        ConditionalExtender().when_extension_enabled("discussions", discussion_frontend_extenders),
+        ConditionalExtender().when_extension_enabled("discussions", discussion_wrapper_integration_extenders),
         ConditionalExtender().when_extension_enabled("posts", post_integration_extenders),
     )
+
+
+def discussion_frontend_extenders():
+    return (discussion_frontend_extender(),)
+
+
+def discussion_wrapper_integration_extenders():
+    return (
+        ModelVisibilityExtender().scope(
+            RuntimeModel("discussions.service", description="discussions wrapper 提供的讨论模型。"),
+            _filter_discussions_for_user,
+            description="隐藏当前用户不可查看标签下的讨论。",
+        ),
+        PolicyExtender().policy(
+            RuntimeModel("discussions.service", description="discussions wrapper 提供的讨论模型。"),
+            DiscussionPolicy,
+        ),
+    )
+
+
+def _filter_discussions_for_user(queryset, context: dict):
+    return TagService.filter_discussions_for_user(queryset, context.get("user"))
 
 
 def service_extenders():

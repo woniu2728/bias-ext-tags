@@ -22,6 +22,14 @@ def frontend_extender():
             ),
             order=30,
         )
+    )
+
+
+def discussion_frontend_extender():
+    return (
+        FrontendExtender(
+            forum_entry="extensions/tags/frontend/forum/index.js",
+        )
         .route(
             "/t/:slug",
             "tag-detail",
