@@ -43,7 +43,6 @@ from bias_ext_tags.backend.events import (
 )
 from bias_ext_tags.backend.models import Tag
 from bias_ext_tags.backend.services import TagService
-from bias_ext_tags.backend.resources import tag_resource_endpoints
 from bias_ext_tags.backend.tag_resource import TagResource
 from bias_core.models import Setting
 from bias_core.settings_service import clear_runtime_setting_caches
@@ -2825,12 +2824,11 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
             )
         )
 
-        with patch("bias_ext_tags.backend.handlers.get_runtime_resource_registry", return_value=registry):
-            with patch("bias_core.resource_dispatcher.get_runtime_resource_registry", return_value=registry):
-                response = self.client.get(
-                    f"/api/tags/{self.members_tag.id}",
-                    **self.auth_header(self.admin),
-                )
+        with patch("bias_core.resource_dispatcher.get_runtime_resource_registry", return_value=registry):
+            response = self.client.get(
+                f"/api/tags/{self.members_tag.id}",
+                **self.auth_header(self.admin),
+            )
 
         self.assertEqual(response.status_code, 200, response.content)
         self.assertTrue(response.json()["mutated_by_resource_endpoint"])
@@ -2866,12 +2864,11 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
             )
         )
 
-        with patch("bias_ext_tags.backend.handlers.get_runtime_resource_registry", return_value=registry):
-            with patch("bias_core.resource_dispatcher.get_runtime_resource_registry", return_value=registry):
-                response = self.client.get(
-                    f"/api/tags/slug/{self.members_tag.slug}",
-                    **self.auth_header(self.admin),
-                )
+        with patch("bias_core.resource_dispatcher.get_runtime_resource_registry", return_value=registry):
+            response = self.client.get(
+                f"/api/tags/slug/{self.members_tag.slug}",
+                **self.auth_header(self.admin),
+            )
 
         self.assertEqual(response.status_code, 200, response.content)
         self.assertTrue(response.json()["mutated_by_resource_endpoint"])

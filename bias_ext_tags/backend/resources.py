@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 from bias_core.extensions import (
-    ResourceEndpointDefinition,
     ResourceFieldDefinition,
     ResourceRelationshipDefinition,
 )
 from bias_ext_tags.backend.constants import EXTENSION_ID
 from bias_ext_tags.backend.models import Tag
-from bias_ext_tags.backend.tag_resource import TagResource, tag_endpoint_specs
+from bias_ext_tags.backend.tag_resource import TagResource
 
 
 def tag_resource_definition():
@@ -146,27 +145,6 @@ def tag_resource_relationship_definitions():
             select_related=("last_posted_discussion",),
             resource_type="discussion",
         ),
-    )
-
-
-def tag_resource_endpoints():
-    return tuple(
-        ResourceEndpointDefinition(
-            resource="tag",
-            endpoint=spec["name"],
-            module_id=EXTENSION_ID,
-            handler=spec["handler"],
-            methods=spec.get("methods", ("GET",)),
-            path=spec.get("path", ""),
-            absolute_path=bool(spec.get("absolute_path", False)),
-            auth_required=bool(spec.get("auth_required", False)),
-            forum_permission=spec.get("forum_permission", ""),
-            default_include=spec.get("default_include", ()),
-            kind=spec.get("kind", ""),
-            ability=spec.get("ability"),
-            response_callback=spec.get("response_callback"),
-        )
-        for spec in tag_endpoint_specs()
     )
 
 
