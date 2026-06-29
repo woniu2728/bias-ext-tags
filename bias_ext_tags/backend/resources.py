@@ -17,13 +17,6 @@ from bias_ext_tags.backend.handlers import (
     dispatch_tag_update,
 )
 from bias_ext_tags.backend.models import Tag
-from bias_core.extensions.runtime import (
-    can_runtime_add_to_discussion,
-    can_runtime_reply_in_tag,
-    can_runtime_start_discussion_in_tag,
-    filter_runtime_tags_for_user,
-    has_runtime_forum_permission,
-)
 
 
 def tag_resource_definition():
@@ -316,6 +309,8 @@ def can_view_tag_admin_fields(context: dict) -> bool:
 
 
 def can_view_tag_stored_slug(tag, context: dict) -> bool:
+    from bias_core.extensions.runtime import has_runtime_forum_permission
+
     user = context.get("user")
     return bool(user and getattr(user, "is_authenticated", False) and has_runtime_forum_permission(user, "tag.edit"))
 
@@ -351,6 +346,7 @@ def resolve_discussion_can_tag(discussion, context: dict) -> bool:
 
 
 def resolve_forum_tags(forum, context: dict) -> list[dict]:
+    from bias_core.extensions.runtime import filter_runtime_tags_for_user
     from bias_ext_tags.backend.services import TagService
 
     user = context.get("user")
@@ -378,6 +374,8 @@ def resolve_forum_tags(forum, context: dict) -> list[dict]:
 
 
 def resolve_forum_can_bypass_tag_counts(forum, context: dict) -> bool:
+    from bias_core.extensions.runtime import has_runtime_forum_permission
+
     user = context.get("user")
     return has_runtime_forum_permission(user, "bypassTagCounts")
 
@@ -417,16 +415,22 @@ def resolve_post_event_mentions_tags(post, context: dict | None = None) -> list[
 
 
 def resolve_tag_can_start_discussion(tag, context: dict) -> bool:
+    from bias_core.extensions.runtime import can_runtime_start_discussion_in_tag
+
     user = context.get("user")
     return can_runtime_start_discussion_in_tag(tag, user)
 
 
 def resolve_tag_can_add_to_discussion(tag, context: dict) -> bool:
+    from bias_core.extensions.runtime import can_runtime_add_to_discussion
+
     user = context.get("user")
     return can_runtime_add_to_discussion(tag, user)
 
 
 def resolve_tag_can_reply(tag, context: dict) -> bool:
+    from bias_core.extensions.runtime import can_runtime_reply_in_tag
+
     user = context.get("user")
     return can_runtime_reply_in_tag(tag, user)
 

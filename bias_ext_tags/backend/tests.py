@@ -1,5 +1,6 @@
 import json
 import re
+import ast
 from pathlib import Path
 
 from django.core.exceptions import PermissionDenied
@@ -126,6 +127,18 @@ def discussion_resource_payload(*, title=None, content=None, tag_ids=None):
 
 
 class TagsExtensionRuntimeTests(ExtensionRuntimeTestMixin, TestCase):
+    def test_tag_resources_do_not_import_runtime_facades_at_module_load(self):
+        source = Path(__file__).with_name("resources.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        runtime_imports = [
+            node
+            for node in tree.body
+            if isinstance(node, ast.ImportFrom)
+            and node.module == "bias_core.extensions.runtime"
+        ]
+
+        self.assertEqual(runtime_imports, [])
+
     def test_tags_extension_registers_extension_settings_page(self):
         registry = ExtensionRegistry()
         extension = registry.get_extension("tags")
