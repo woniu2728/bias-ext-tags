@@ -118,10 +118,24 @@ def tag_resource_field_definitions():
         ),
         ResourceFieldDefinition(
             resource="tag",
+            field="canStartDiscussion",
+            module_id=EXTENSION_ID,
+            resolver=resolve_tag_can_start_discussion,
+            description="Flarum 兼容字段：当前用户是否可以在该标签下发起讨论。",
+        ),
+        ResourceFieldDefinition(
+            resource="tag",
             field="can_add_to_discussion",
             module_id=EXTENSION_ID,
             resolver=resolve_tag_can_add_to_discussion,
             description="当前用户是否可以把该标签添加到已有讨论。",
+        ),
+        ResourceFieldDefinition(
+            resource="tag",
+            field="canAddToDiscussion",
+            module_id=EXTENSION_ID,
+            resolver=resolve_tag_can_add_to_discussion,
+            description="Flarum 兼容字段：当前用户是否可以把该标签添加到已有讨论。",
         ),
         ResourceFieldDefinition(
             resource="tag",
@@ -136,6 +150,14 @@ def tag_resource_field_definitions():
             module_id=EXTENSION_ID,
             resolver=resolve_tag_last_posted_discussion,
             description="标签下最后活跃讨论摘要。",
+            select_related=("last_posted_discussion",),
+        ),
+        ResourceFieldDefinition(
+            resource="tag",
+            field="lastPostedDiscussion",
+            module_id=EXTENSION_ID,
+            resolver=resolve_tag_last_posted_discussion,
+            description="Flarum 兼容字段：标签下最后活跃讨论摘要。",
             select_related=("last_posted_discussion",),
         ),
         ResourceFieldDefinition(
@@ -178,6 +200,15 @@ def tag_resource_relationship_definitions():
             module_id=EXTENSION_ID,
             resolver=resolve_tag_last_posted_discussion_resource,
             description="标签下最后活跃讨论资源。",
+            select_related=("last_posted_discussion",),
+            resource_type="discussion",
+        ),
+        ResourceRelationshipDefinition(
+            resource="tag",
+            relationship="lastPostedDiscussion",
+            module_id=EXTENSION_ID,
+            resolver=resolve_tag_last_posted_discussion_resource,
+            description="Flarum 兼容关系：标签下最后活跃讨论资源。",
             select_related=("last_posted_discussion",),
             resource_type="discussion",
         ),
@@ -281,11 +312,21 @@ def serialize_tag_base(tag, context: dict) -> dict:
         "created_at": tag.created_at,
         "updated_at": tag.updated_at,
     }
+    payload.update({
+        "defaultSort": payload["default_sort"],
+        "isHidden": payload["is_hidden"],
+        "isPrimary": payload["is_primary"],
+        "isChild": payload["is_child"],
+        "discussionCount": payload["discussion_count"],
+        "lastPostedAt": payload["last_posted_at"],
+    })
     if can_view_tag_stored_slug(tag, context):
         payload["stored_slug"] = tag.slug
+        payload["storedSlug"] = tag.slug
     if can_view_tag_admin_fields(context):
         payload.update({
             "is_restricted": tag.is_restricted,
+            "isRestricted": tag.is_restricted,
             "view_scope": tag.view_scope,
             "start_discussion_scope": tag.start_discussion_scope,
             "reply_scope": tag.reply_scope,
@@ -430,22 +471,28 @@ def resolve_post_event_mentions_tags(post, context: dict | None = None) -> list[
 def resolve_tag_can_start_discussion(tag, context: dict) -> bool:
     from bias_core.extensions.runtime import can_runtime_start_discussion_in_tag
 
-    user = context.get("user")
-    return can_runtime_start_discussion_in_tag(tag, user)
+    return _cached_tag_permission(context, tag, "can_start_discussion", can_runtime_start_discussion_in_tag)
 
 
 def resolve_tag_can_add_to_discussion(tag, context: dict) -> bool:
     from bias_core.extensions.runtime import can_runtime_add_to_discussion
 
-    user = context.get("user")
-    return can_runtime_add_to_discussion(tag, user)
+    return _cached_tag_permission(context, tag, "can_add_to_discussion", can_runtime_add_to_discussion)
 
 
 def resolve_tag_can_reply(tag, context: dict) -> bool:
     from bias_core.extensions.runtime import can_runtime_reply_in_tag
 
+    return _cached_tag_permission(context, tag, "can_reply", can_runtime_reply_in_tag)
+
+
+def _cached_tag_permission(context: dict, tag, permission: str, resolver) -> bool:
     user = context.get("user")
-    return can_runtime_reply_in_tag(tag, user)
+    cache = context.setdefault("_tag_permission_results", {})
+    key = (getattr(tag, "id", None), getattr(user, "id", None), context.get("action", "view"), permission)
+    if key not in cache:
+        cache[key] = bool(resolver(tag, user))
+    return cache[key]
 
 
 def resolve_tag_last_posted_discussion(tag, context: dict) -> dict | None:
@@ -479,7 +526,7 @@ def resolve_tag_parent(tag, context: dict):
 
 def tag_parent_relationship_writable(tag, context: dict) -> bool:
     attributes = _tag_resource_attributes(context)
-    return bool(attributes.get("is_primary"))
+    return bool(attributes.get("is_primary") or attributes.get("isPrimary"))
 
 
 def set_tag_parent_relationship(tag, value, context: dict) -> None:
@@ -540,6 +587,9 @@ def _serialize_forum_tag(tag, context: dict, include_children: bool = True) -> d
     payload["can_add_to_discussion"] = resolve_tag_can_add_to_discussion(tag, context)
     payload["can_reply"] = resolve_tag_can_reply(tag, context)
     payload["last_posted_discussion"] = resolve_tag_last_posted_discussion(tag, context)
+    payload["canStartDiscussion"] = payload["can_start_discussion"]
+    payload["canAddToDiscussion"] = payload["can_add_to_discussion"]
+    payload["lastPostedDiscussion"] = payload["last_posted_discussion"]
     children = getattr(tag, "visible_children", []) if include_children else []
     payload["children"] = [
         _serialize_forum_tag(child, context, include_children=False)

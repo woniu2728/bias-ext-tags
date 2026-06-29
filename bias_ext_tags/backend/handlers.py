@@ -123,13 +123,33 @@ def _tag_payload(context) -> dict:
         return {}
     data = payload.get("data")
     if not isinstance(data, dict):
-        return dict(payload)
+        return _normalize_tag_payload_attributes(dict(payload))
 
     attributes = data.get("attributes")
     normalized = dict(attributes) if isinstance(attributes, dict) else {}
+    normalized = _normalize_tag_payload_attributes(normalized)
     relationships = data.get("relationships")
     if isinstance(relationships, dict) and "parent" in relationships:
         normalized["parent_id"] = _tag_relationship_id(relationships.get("parent"))
+    return normalized
+
+
+def _normalize_tag_payload_attributes(attributes: dict) -> dict:
+    normalized = dict(attributes)
+    aliases = {
+        "backgroundUrl": "background_url",
+        "defaultSort": "default_sort",
+        "isHidden": "is_hidden",
+        "isPrimary": "is_primary",
+        "isRestricted": "is_restricted",
+        "parentId": "parent_id",
+        "replyScope": "reply_scope",
+        "startDiscussionScope": "start_discussion_scope",
+        "viewScope": "view_scope",
+    }
+    for source, target in aliases.items():
+        if source in normalized and target not in normalized:
+            normalized[target] = normalized[source]
     return normalized
 
 

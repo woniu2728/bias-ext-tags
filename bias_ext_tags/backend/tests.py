@@ -1966,6 +1966,67 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         tag.refresh_from_db()
         self.assertIsNone(tag.parent_id)
 
+    def test_tag_create_and_update_accept_camel_case_attributes_like_flarum(self):
+        response = self.client.post(
+            "/api/tags",
+            data=json.dumps({
+                "data": {
+                    "type": "tag",
+                    "attributes": {
+                        "name": "Camel 标签",
+                        "slug": "camel-tag",
+                        "defaultSort": "latest",
+                        "isHidden": True,
+                        "isPrimary": False,
+                        "isRestricted": True,
+                    },
+                },
+            }),
+            content_type="application/json",
+            **self.auth_header(self.admin),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertEqual(payload["default_sort"], "latest")
+        self.assertEqual(payload["defaultSort"], "latest")
+        self.assertTrue(payload["is_hidden"])
+        self.assertTrue(payload["isHidden"])
+        self.assertFalse(payload["is_primary"])
+        self.assertFalse(payload["isPrimary"])
+        self.assertTrue(payload["is_restricted"])
+        self.assertTrue(payload["isRestricted"])
+
+        tag = Tag.objects.get(id=payload["id"])
+        response = self.client.patch(
+            f"/api/tags/{tag.id}",
+            data=json.dumps({
+                "data": {
+                    "type": "tag",
+                    "attributes": {
+                        "defaultSort": "top",
+                        "isHidden": False,
+                        "isPrimary": True,
+                        "parentId": self.public_tag.id,
+                    },
+                },
+            }),
+            content_type="application/json",
+            **self.auth_header(self.admin),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertEqual(payload["defaultSort"], "top")
+        self.assertFalse(payload["isHidden"])
+        self.assertTrue(payload["isPrimary"])
+        self.assertEqual(payload["parent_id"], self.public_tag.id)
+        tag.refresh_from_db()
+        self.assertEqual(tag.default_sort, "top")
+        self.assertFalse(tag.is_hidden)
+        self.assertTrue(tag.is_primary)
+        self.assertEqual(tag.parent_id, self.public_tag.id)
+
     def test_tag_detail_exposes_registered_resource_fields(self):
         with self.captureOnCommitCallbacks(execute=True):
             discussion = create_runtime_discussion(
@@ -1983,9 +2044,81 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         payload = response.json()
         self.assertTrue(payload["can_start_discussion"])
+        self.assertTrue(payload["canStartDiscussion"])
         self.assertTrue(payload["can_add_to_discussion"])
+        self.assertTrue(payload["canAddToDiscussion"])
         self.assertTrue(payload["can_reply"])
         self.assertEqual(payload["last_posted_discussion"]["id"], discussion.id)
+        self.assertEqual(payload["lastPostedDiscussion"]["id"], discussion.id)
+
+    def test_tag_detail_exposes_flarum_camel_case_base_fields(self):
+        self.public_tag.default_sort = "latest"
+        self.public_tag.discussion_count = 3
+        self.public_tag.is_hidden = True
+        self.public_tag.save(update_fields=["default_sort", "discussion_count", "is_hidden"])
+
+        response = self.client.get(
+            f"/api/tags/{self.public_tag.id}",
+            {"include_hidden": True},
+            **self.auth_header(self.admin),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertEqual(payload["defaultSort"], "latest")
+        self.assertTrue(payload["isHidden"])
+        self.assertTrue(payload["isPrimary"])
+        self.assertFalse(payload["isChild"])
+        self.assertEqual(payload["discussionCount"], 3)
+        self.assertEqual(payload["storedSlug"], self.public_tag.slug)
+        self.assertEqual(payload["isRestricted"], self.public_tag.is_restricted)
+
+    def test_tag_detail_resource_field_selection_respects_camel_case_resource_fields(self):
+        create_runtime_discussion(
+            title="标签 camelCase 字段裁剪",
+            content="用于裁剪",
+            user=self.admin,
+            extension_payload=discussion_tags_payload([self.members_tag.id]),
+        )
+
+        response = self.client.get(
+            f"/api/tags/{self.members_tag.id}",
+            {"fields[tag]": "can_reply"},
+            **self.auth_header(self.admin),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertIn("can_reply", payload)
+        self.assertNotIn("can_start_discussion", payload)
+        self.assertNotIn("canStartDiscussion", payload)
+        self.assertNotIn("can_add_to_discussion", payload)
+        self.assertNotIn("canAddToDiscussion", payload)
+        self.assertNotIn("last_posted_discussion", payload)
+        self.assertNotIn("lastPostedDiscussion", payload)
+
+    def test_tag_detail_supports_flarum_last_posted_discussion_include_name(self):
+        discussion = create_runtime_discussion(
+            title="标签 camelCase include 讨论",
+            content="用于 include",
+            user=self.admin,
+            extension_payload=discussion_tags_payload([self.members_tag.id]),
+        )
+        TagService.refresh_tag_stats([self.members_tag.id])
+
+        response = self.client.get(
+            f"/api/tags/{self.members_tag.id}",
+            {"fields[tag]": "can_reply", "include": "lastPostedDiscussion"},
+            **self.auth_header(self.admin),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertIn("can_reply", payload)
+        self.assertIn("lastPostedDiscussion", payload)
+        self.assertEqual(payload["lastPostedDiscussion"]["id"], discussion.id)
+        self.assertEqual(payload["lastPostedDiscussion"]["last_post_number"], discussion.last_post_number)
+        self.assertNotIn("user", payload["lastPostedDiscussion"])
 
     def test_tag_update_without_parent_field_preserves_existing_parent(self):
         child = Tag.objects.create(
