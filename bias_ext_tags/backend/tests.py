@@ -2440,6 +2440,42 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
             {first_discussion.id, second_discussion.id},
         )
 
+    def test_discussion_list_tag_filter_supports_multiple_and_groups(self):
+        first_tag = Tag.objects.create(name="列表交集标签一", slug="list-and-one")
+        second_tag = Tag.objects.create(
+            name="列表交集标签二",
+            slug="list-and-two",
+            position=None,
+            is_primary=False,
+        )
+        other_tag = Tag.objects.create(name="列表交集标签三", slug="list-and-three")
+        matched = create_runtime_discussion(
+            title="列表标签交集命中",
+            content="同时拥有两个标签。",
+            user=self.author,
+            extension_payload=discussion_tags_payload([first_tag.id, second_tag.id]),
+        )
+        create_runtime_discussion(
+            title="列表标签交集缺一",
+            content="只拥有第一个标签。",
+            user=self.author,
+            extension_payload=discussion_tags_payload([first_tag.id]),
+        )
+        create_runtime_discussion(
+            title="列表标签交集无关",
+            content="拥有其他标签。",
+            user=self.author,
+            extension_payload=discussion_tags_payload([other_tag.id]),
+        )
+
+        response = self.client.get(
+            "/api/discussions/?tag=list-and-one&tag=list-and-two",
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["total"], 1)
+        self.assertEqual([item["id"] for item in response.json()["data"]], [matched.id])
+
     def test_discussion_list_tag_filter_resolves_multiple_slugs_with_one_lookup(self):
         tags = [
             Tag.objects.create(name=f"查询标签 {index}", slug=f"query-filter-{index}")

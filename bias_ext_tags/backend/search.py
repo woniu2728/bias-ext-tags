@@ -137,12 +137,16 @@ def _resolve_tag_slug_ids(groups: tuple[tuple[str, ...], ...], context: dict) ->
     }
 
 
-def _query_param_value(params, key: str) -> str:
+def _query_param_value(params, key: str):
     if not isinstance(params, dict):
         return ""
     value = params.get(key)
     if isinstance(value, (list, tuple)):
-        value = value[0] if value else ""
+        return [
+            str(item or "").strip().lower()
+            for item in value
+            if str(item or "").strip()
+        ]
     return str(value or "").strip().lower()
 
 
