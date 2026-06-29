@@ -3,7 +3,7 @@ from __future__ import annotations
 from django.core.exceptions import PermissionDenied
 from django.db.models import Prefetch
 from django.db.models import Q
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse
 from ninja import Body
 
 from bias_core.extensions.platform import api_error
@@ -99,6 +99,86 @@ def _serialize_tag(
 
     payload["children"] = children
     return payload
+
+
+def _wants_jsonapi_response(context) -> bool:
+    request = context.get("request")
+    accept = str(getattr(request, "META", {}).get("HTTP_ACCEPT", "") or "")
+    return "application/vnd.api+json" in accept.lower()
+
+
+def _jsonapi_serialize_context(context, *, action="view") -> dict:
+    output = _build_tag_serialize_context(context.get("user"), action=action)
+    output.update({
+        "request": context.get("request"),
+        "query": dict(context.get("query") or {}),
+        "resource_options": context.get("resource_options"),
+        "default_include": tuple(context.get("default_include") or ()),
+        "plain_related_fields": {
+            "discussion": ("id", "title", "slug", "last_post_number", "last_posted_at"),
+        },
+    })
+    return output
+
+
+def _jsonapi_tag_response(tag, context, *, action="view", status=200):
+    if not _wants_jsonapi_response(context):
+        return None
+    resource_options = _tag_resource_options(context)
+    document = _get_resource_registry().serialize_jsonapi_document(
+        "tag",
+        tag,
+        _jsonapi_serialize_context(context, action=action),
+        only=resource_options.fields,
+        include=resource_options.includes,
+    )
+    return JsonResponse(
+        _flarum_jsonapi_document(document),
+        status=status,
+        content_type="application/vnd.api+json",
+    )
+
+
+def _jsonapi_tags_response(tags, context, *, action="view"):
+    if not _wants_jsonapi_response(context):
+        return None
+    resource_options = _tag_resource_options(context)
+    document = _get_resource_registry().serialize_jsonapi_document(
+        "tag",
+        tags,
+        _jsonapi_serialize_context(context, action=action),
+        only=resource_options.fields,
+        include=resource_options.includes,
+        many=True,
+    )
+    return JsonResponse(
+        _flarum_jsonapi_document(document),
+        content_type="application/vnd.api+json",
+    )
+
+
+def _flarum_jsonapi_document(value):
+    if isinstance(value, list):
+        return [_flarum_jsonapi_document(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    output = {
+        key: _flarum_jsonapi_document(item)
+        for key, item in value.items()
+    }
+    resource_type = output.get("type")
+    if resource_type in {"tag", "discussion"}:
+        output["type"] = f"{resource_type}s"
+    links = output.get("links")
+    if isinstance(links, dict):
+        self_link = links.get("self")
+        if isinstance(self_link, str):
+            links["self"] = (
+                self_link
+                .replace("/api/tag/", "/api/tags/")
+                .replace("/api/discussion/", "/api/discussions/")
+            )
+    return output
 
 
 def _apply_tag_resource_preloads(queryset, user=None, action="view", resource_options=None):
@@ -234,6 +314,9 @@ def dispatch_tag_create(context):
             reply_scope=payload.reply_scope or Tag.ACCESS_MEMBERS,
             user=context["user"],
         )
+        jsonapi_response = _jsonapi_tag_response(tag, context, action="view", status=201)
+        if jsonapi_response is not None:
+            return jsonapi_response
         return _serialize_tag(tag, user=context["user"], include_children=True)
     except PermissionDenied as e:
         return api_error(str(e), status=403)
@@ -289,6 +372,10 @@ def dispatch_tag_index(context):
 
     serialize_context = _build_tag_serialize_context(user, action=purpose)
     serialize_context["include_hidden"] = include_hidden
+    tag_list = list(tags)
+    jsonapi_response = _jsonapi_tags_response(tag_list, context, action=purpose)
+    if jsonapi_response is not None:
+        return jsonapi_response
     return {
         "data": [
             _serialize_tag(
@@ -299,7 +386,7 @@ def dispatch_tag_index(context):
                 context=serialize_context,
                 resource_options=resource_options,
             )
-            for tag in tags
+            for tag in tag_list
         ]
     }
 
@@ -338,10 +425,14 @@ def dispatch_tag_popular(context):
     ).order_by("-discussion_count", "-last_posted_at")[:limit]
 
     serialize_context = _build_tag_serialize_context(user, action="view")
+    tag_list = list(tags)
+    jsonapi_response = _jsonapi_tags_response(tag_list, context, action="view")
+    if jsonapi_response is not None:
+        return jsonapi_response
     return {
         "data": [
             _serialize_tag(tag, user=user, context=serialize_context, resource_options=resource_options)
-            for tag in tags
+            for tag in tag_list
         ]
     }
 
@@ -372,6 +463,9 @@ def dispatch_tag_show(context):
         return api_error("标签不存在", status=404)
     if hasattr(tag, "status_code"):
         return tag
+    jsonapi_response = _jsonapi_tag_response(tag, context, action="view")
+    if jsonapi_response is not None:
+        return jsonapi_response
     return _serialize_tag(tag, user=user, include_children=True, resource_options=resource_options)
 
 
@@ -385,6 +479,9 @@ def dispatch_tag_show_by_slug(context):
         return api_error("标签不存在", status=404)
     if hasattr(tag, "status_code"):
         return tag
+    jsonapi_response = _jsonapi_tag_response(tag, context, action="view")
+    if jsonapi_response is not None:
+        return jsonapi_response
     return _serialize_tag(tag, user=user, include_children=True, resource_options=resource_options)
 
 
@@ -427,6 +524,9 @@ def dispatch_tag_update(context):
         tag = TagService.update_tag(**update_kwargs)
 
         tag = Tag.objects.select_related("last_posted_discussion").prefetch_related("children").get(id=tag.id)
+        jsonapi_response = _jsonapi_tag_response(tag, context, action="view")
+        if jsonapi_response is not None:
+            return jsonapi_response
         return _serialize_tag(tag, user=context["user"], include_children=True)
     except Tag.DoesNotExist:
         return api_error("标签不存在", status=404)
@@ -439,6 +539,8 @@ def dispatch_tag_update(context):
 def dispatch_tag_delete(context):
     try:
         TagService.delete_tag(_tag_object_id(context), context["user"])
+        if _wants_jsonapi_response(context):
+            return HttpResponse(status=204)
         return {"message": "标签已删除"}
     except Tag.DoesNotExist:
         return api_error("标签不存在", status=404)

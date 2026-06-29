@@ -1397,6 +1397,12 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         token = RefreshToken.for_user(user).access_token
         return {"HTTP_AUTHORIZATION": f"Bearer {token}"}
 
+    def jsonapi_header(self, user=None):
+        headers = {"HTTP_ACCEPT": "application/vnd.api+json"}
+        if user is not None:
+            headers.update(self.auth_header(user))
+        return headers
+
     def test_guest_tag_list_hides_member_and_staff_tags(self):
         response = self.client.get("/api/tags")
 
@@ -2027,6 +2033,34 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertTrue(tag.is_primary)
         self.assertEqual(tag.parent_id, self.public_tag.id)
 
+    def test_tag_create_can_return_flarum_jsonapi_document_when_requested(self):
+        response = self.client.post(
+            "/api/tags",
+            data=json.dumps({
+                "data": {
+                    "type": "tags",
+                    "attributes": {
+                        "name": "JSONAPI 标签",
+                        "slug": "jsonapi-tag",
+                        "description": "Flarum shape",
+                        "color": "#123456",
+                    },
+                },
+            }),
+            content_type="application/json",
+            **self.jsonapi_header(self.admin),
+        )
+
+        self.assertEqual(response.status_code, 201, response.content)
+        self.assertEqual(response["Content-Type"], "application/vnd.api+json")
+        data = response.json()["data"]
+        self.assertEqual(data["type"], "tags")
+        self.assertEqual(data["attributes"]["name"], "JSONAPI 标签")
+        self.assertEqual(data["attributes"]["slug"], "jsonapi-tag")
+        self.assertEqual(data["attributes"]["description"], "Flarum shape")
+        self.assertEqual(data["attributes"]["color"], "#123456")
+        self.assertEqual(Tag.objects.get(slug="jsonapi-tag").name, "JSONAPI 标签")
+
     def test_tag_detail_exposes_registered_resource_fields(self):
         with self.captureOnCommitCallbacks(execute=True):
             discussion = create_runtime_discussion(
@@ -2050,6 +2084,47 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertTrue(payload["can_reply"])
         self.assertEqual(payload["last_posted_discussion"]["id"], discussion.id)
         self.assertEqual(payload["lastPostedDiscussion"]["id"], discussion.id)
+
+    def test_tag_detail_can_return_flarum_jsonapi_document_when_requested(self):
+        child = Tag.objects.create(
+            name="JSONAPI 子标签",
+            slug="jsonapi-child",
+            parent=self.public_tag,
+            position=1,
+        )
+
+        response = self.client.get(
+            f"/api/tags/{child.id}",
+            {"include": "parent"},
+            **self.jsonapi_header(self.admin),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response["Content-Type"], "application/vnd.api+json")
+        payload = response.json()
+        self.assertNotIn("name", payload)
+        self.assertEqual(payload["data"]["type"], "tags")
+        self.assertEqual(payload["data"]["id"], str(child.id))
+        self.assertEqual(payload["data"]["attributes"]["name"], "JSONAPI 子标签")
+        self.assertTrue(payload["data"]["attributes"]["isChild"])
+        self.assertEqual(
+            payload["data"]["relationships"]["parent"]["data"],
+            {"type": "tags", "id": str(self.public_tag.id)},
+        )
+        self.assertEqual(payload["included"][0]["type"], "tags")
+
+    def test_tag_index_can_return_flarum_jsonapi_document_when_requested(self):
+        response = self.client.get(
+            "/api/tags",
+            **self.jsonapi_header(self.member),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertIn("data", payload)
+        self.assertEqual([item["type"] for item in payload["data"]], ["tags", "tags"])
+        slugs = [item["attributes"]["slug"] for item in payload["data"]]
+        self.assertEqual(slugs, ["public-tag", "members-tag"])
 
     def test_tag_detail_exposes_flarum_camel_case_base_fields(self):
         self.public_tag.default_sort = "latest"
@@ -2119,6 +2194,18 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(payload["lastPostedDiscussion"]["id"], discussion.id)
         self.assertEqual(payload["lastPostedDiscussion"]["last_post_number"], discussion.last_post_number)
         self.assertNotIn("user", payload["lastPostedDiscussion"])
+
+    def test_tag_delete_can_return_flarum_jsonapi_no_content_when_requested(self):
+        tag = Tag.objects.create(name="JSONAPI 删除", slug="jsonapi-delete")
+
+        response = self.client.delete(
+            f"/api/tags/{tag.id}",
+            **self.jsonapi_header(self.admin),
+        )
+
+        self.assertEqual(response.status_code, 204, response.content)
+        self.assertEqual(response.content, b"")
+        self.assertFalse(Tag.objects.filter(id=tag.id).exists())
 
     def test_tag_update_without_parent_field_preserves_existing_parent(self):
         child = Tag.objects.create(
