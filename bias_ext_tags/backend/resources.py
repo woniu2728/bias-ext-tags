@@ -49,6 +49,13 @@ def discussion_resource_field_definitions():
             description="讨论关联的标签列表。",
             prefetch_related=("discussion_tags__tag", "discussion_tags__tag__parent"),
         ),
+        ResourceFieldDefinition(
+            resource="discussion",
+            field="can_tag",
+            module_id=EXTENSION_ID,
+            resolver=resolve_discussion_can_tag,
+            description="当前用户是否可以调整讨论标签。",
+        ),
     )
 
 
@@ -328,6 +335,12 @@ def resolve_discussion_tag_resources(discussion, context: dict) -> list[Tag]:
     from bias_ext_tags.backend.tag_relationships import get_discussion_tags
 
     return get_discussion_tags(discussion)
+
+
+def resolve_discussion_can_tag(discussion, context: dict) -> bool:
+    from bias_ext_tags.backend.services import TagService
+
+    return TagService.can_tag_discussion(discussion, context.get("user"))
 
 
 def resolve_forum_tags(forum, context: dict) -> list[dict]:

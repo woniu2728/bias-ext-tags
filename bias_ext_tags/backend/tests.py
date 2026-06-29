@@ -3038,6 +3038,29 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(payload["data"][0]["id"], life_discussion.id)
         self.assertEqual(payload["data"][0]["tags"][0]["slug"], life_tag.slug)
 
+    def test_discussion_detail_exposes_can_tag_field(self):
+        tag = Tag.objects.create(name="可改标签", slug="can-tag-discussion")
+        discussion = create_runtime_discussion(
+            title="Can tag discussion",
+            content="用于验证讨论资源 can_tag 字段。",
+            user=self.author,
+            extension_payload=discussion_tags_payload([tag.id]),
+        )
+
+        author_response = self.client.get(
+            f"/api/discussions/{discussion.id}",
+            **self.auth_header(self.author),
+        )
+        reader_response = self.client.get(
+            f"/api/discussions/{discussion.id}",
+            **self.auth_header(self.reader),
+        )
+
+        self.assertEqual(author_response.status_code, 200, author_response.content)
+        self.assertEqual(reader_response.status_code, 200, reader_response.content)
+        self.assertTrue(author_response.json()["can_tag"])
+        self.assertFalse(reader_response.json()["can_tag"])
+
     def test_discussion_list_accepts_json_api_filter_tag_param(self):
         matched_tag = Tag.objects.create(name="JSON API 标签", slug="json-api-filter")
         other_tag = Tag.objects.create(name="其他 JSON API 标签", slug="json-api-other")
