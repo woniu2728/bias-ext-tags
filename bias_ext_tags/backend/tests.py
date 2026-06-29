@@ -2128,8 +2128,9 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(include_child_slugs, ["direct-child"])
 
 
-class TagForumSettingsTests(TestCase):
+class TagForumSettingsTests(ExtensionRuntimeTestMixin, TestCase):
     def setUp(self):
+        self.bootstrap_extensions("tags")
         clear_runtime_setting_caches()
         self.admin = User.objects.create_superuser(
             username="tag-forum-admin",
@@ -2210,6 +2211,13 @@ class TagForumSettingsTests(TestCase):
                 for item in payload["event_listeners"]
             )
         )
+
+    def test_tags_extension_adds_forum_show_default_includes(self):
+        endpoint = get_resource_registry().get_dispatch_endpoint("forum", "show", "GET")
+
+        self.assertIsNotNone(endpoint)
+        self.assertIn("tags", endpoint.default_include)
+        self.assertIn("tags.parent", endpoint.default_include)
 
     def test_public_forum_settings_expose_tags_forum_resource_fields(self):
         parent = Tag.objects.create(
