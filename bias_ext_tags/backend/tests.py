@@ -217,6 +217,29 @@ class TagsExtensionRuntimeTests(ExtensionRuntimeTestMixin, TestCase):
 
         self.assertEqual(runtime_imports, [])
 
+    def test_production_code_does_not_import_legacy_endpoint_facades(self):
+        backend_dir = Path(__file__).parent
+        allowed = {"tests.py", "handlers.py", "resource_endpoints.py"}
+        violations = []
+        forbidden_modules = {
+            "bias_ext_tags.backend.handlers",
+            "bias_ext_tags.backend.resource_endpoints",
+        }
+
+        for path in sorted(backend_dir.glob("*.py")):
+            if path.name in allowed:
+                continue
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom) and node.module in forbidden_modules:
+                    violations.append(f"{path.name}:{node.lineno}:{node.module}")
+                elif isinstance(node, ast.Import):
+                    for alias in node.names:
+                        if alias.name in forbidden_modules:
+                            violations.append(f"{path.name}:{node.lineno}:{alias.name}")
+
+        self.assertEqual(violations, [])
+
     def test_tags_extension_registers_extension_settings_page(self):
         registry = ExtensionRegistry()
         extension = registry.get_extension("tags")
