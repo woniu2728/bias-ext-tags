@@ -74,6 +74,7 @@ def replace_discussion_tags(discussion, tags: Iterable) -> dict:
         DiscussionTag(discussion=discussion, tag=tag)
         for tag in normalized_tags
     ])
+    _clear_discussion_tags_prefetch_cache(discussion)
 
     current_tag_ids = tuple(tag.id for tag in normalized_tags)
     current_tag_names = tuple(tag.name for tag in sorted(normalized_tags, key=lambda item: item.name))
@@ -94,6 +95,12 @@ def replace_discussion_tags(discussion, tags: Iterable) -> dict:
 
 def tag_has_discussions(tag) -> bool:
     return DiscussionTag.objects.filter(tag=tag).exists()
+
+
+def _clear_discussion_tags_prefetch_cache(discussion) -> None:
+    prefetched = getattr(discussion, "_prefetched_objects_cache", None)
+    if isinstance(prefetched, dict):
+        prefetched.pop("discussion_tags", None)
 
 
 def get_discussion_tag_ids_for_stats(discussion) -> list[int]:

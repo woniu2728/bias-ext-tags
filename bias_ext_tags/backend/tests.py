@@ -3458,6 +3458,41 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
             tuple(sorted((parent_tag.id, old_child_tag.id, new_child_tag.id))),
         )
 
+    def test_replacing_discussion_tags_clears_prefetched_relationship_cache(self):
+        from bias_ext_tags.backend.discussion_relationships import set_discussion_tags_relationship
+        from bias_ext_tags.backend.tag_relationships import serialize_discussion_tag_summaries
+
+        first_tag = Tag.objects.create(name="预取旧标签", slug="prefetched-old-tag", color="#2980b9")
+        second_tag = Tag.objects.create(name="预取新标签", slug="prefetched-new-tag", color="#e67e22")
+        discussion = create_runtime_discussion(
+            title="Prefetched retag",
+            content="Initial content",
+            user=self.author,
+            extension_payload=discussion_tags_payload([first_tag.id]),
+        )
+        Discussion = type(discussion)
+        prefetched_discussion = Discussion.objects.prefetch_related("discussion_tags__tag").get(id=discussion.id)
+
+        self.assertEqual(
+            [item["slug"] for item in serialize_discussion_tag_summaries(prefetched_discussion)],
+            [first_tag.slug],
+        )
+
+        set_discussion_tags_relationship(
+            prefetched_discussion,
+            {"data": [{"type": "tag", "id": str(second_tag.id)}]},
+            {"user": self.author},
+        )
+
+        self.assertNotIn(
+            "discussion_tags",
+            getattr(prefetched_discussion, "_prefetched_objects_cache", {}),
+        )
+        self.assertEqual(
+            [item["slug"] for item in serialize_discussion_tag_summaries(prefetched_discussion)],
+            [second_tag.slug],
+        )
+
     def test_updating_discussion_tags_creates_discussion_tagged_event_post(self):
         member_group = Group.objects.create(name="DiscussionTagEditor", color="#4d698e")
         Permission.objects.create(group=member_group, permission="startDiscussion")
