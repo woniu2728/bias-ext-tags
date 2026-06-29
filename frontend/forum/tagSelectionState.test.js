@@ -90,6 +90,20 @@ test('tag selection filters child tags whose parent is not selected', () => {
   assert.deepEqual(state.selectedSecondaryIds, [11, 3])
 })
 
+test('tag selection counts direct child tags once their primary parent is selected', () => {
+  const withoutPrimary = createTagSelectionState({
+    tags,
+  })
+  const withPrimary = createTagSelectionState({
+    tags,
+    primaryTagIds: [1],
+  })
+
+  assert.equal(withoutPrimary.availableTagCount, 3)
+  assert.equal(withPrimary.availableTagCount, 4)
+  assert.deepEqual(withPrimary.secondaryOptions.map(tag => tag.id), [11, 3])
+})
+
 test('tag selection ignores legacy grandchildren in flattened choices', () => {
   const state = createTagSelectionState({
     tags,

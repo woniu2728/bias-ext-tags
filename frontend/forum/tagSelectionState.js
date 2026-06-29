@@ -52,13 +52,15 @@ export function createTagSelectionState({
   const selectedSecondaryIds = normalizeSelectionIds(secondaryTagIds)
     .filter(tagId => allowedSecondaryIds.has(tagId))
     .slice(0, limits.maxSecondary)
+  const primaryTags = flatTags.filter(isPrimaryRootTag).sort(sortTagsByStructure)
+  const rootSecondaryTags = flatTags.filter(isSecondaryRootTag).sort(sortTagsByStructure)
 
   return {
-    availableTagCount: flatTags.filter(tag => isPrimaryRootTag(tag) || isSecondaryRootTag(tag)).length,
+    availableTagCount: primaryTags.length + secondaryOptions.length,
     flatTags,
     limits,
-    primaryTags: flatTags.filter(isPrimaryRootTag).sort(sortTagsByStructure),
-    rootSecondaryTags: flatTags.filter(isSecondaryRootTag).sort(sortTagsByStructure),
+    primaryTags,
+    rootSecondaryTags,
     secondaryOptions,
     selectedPrimaryIds,
     selectedSecondaryIds,

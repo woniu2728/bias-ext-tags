@@ -107,7 +107,6 @@ const selectionState = computed(() => createTagSelectionState({
   settings: forumStore.settings || {},
 }))
 const primaryTags = computed(() => selectionState.value.primaryTags)
-const rootSecondaryTags = computed(() => selectionState.value.rootSecondaryTags)
 const secondaryTagOptions = computed(() => selectionState.value.secondaryOptions)
 const selectedTagIds = computed(() => selectionState.value.selectedTagIds)
 const selectedTagLabel = computed(() => summarizeSelectedTags(selectionState.value.selectedTags))
@@ -207,7 +206,7 @@ function syncState() {
   }
   props.updateState({
     availablePrimaryTagCount: primaryTags.value.length,
-    availableTagCount: primaryTags.value.length + rootSecondaryTags.value.length,
+    availableTagCount: selectionState.value.availableTagCount,
     loadingTags: loadingTags.value,
     maxPrimaryTagCount: tagLimits.value.maxPrimary,
     maxSecondaryTagCount: tagLimits.value.maxSecondary,
