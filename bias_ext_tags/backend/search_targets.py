@@ -10,5 +10,5 @@ def tag_search_target_provider() -> dict:
         "resource": "tag",
         "results_key": "tags",
         "apply_visibility": lambda queryset, user: TagService.filter_tags_for_user(queryset, user, action="view"),
-        "order_by": ("position", "name", "id"),
+        "order_by": lambda queryset: queryset.order_by(*TagService.structure_order_by(include_id=True)),
     }

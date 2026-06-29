@@ -2951,6 +2951,38 @@ class TagSearchApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(payload["tag_total"], 2)
         self.assertEqual({item["id"] for item in payload["tags"]}, {matched_by_name.id, matched_by_slug.id})
 
+    def test_search_api_tags_type_uses_structural_ordering(self):
+        secondary = Tag.objects.create(
+            name="Support Secondary",
+            slug="support-secondary",
+            position=None,
+            is_primary=False,
+        )
+        primary = Tag.objects.create(
+            name="Support Primary",
+            slug="support-primary",
+            position=0,
+            is_primary=True,
+        )
+        later_primary = Tag.objects.create(
+            name="Support Later",
+            slug="support-later",
+            position=1,
+            is_primary=True,
+        )
+
+        response = self.client.get(
+            "/api/search",
+            {"q": "support", "type": "tag"},
+            **self.auth_header(),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(
+            [item["id"] for item in response.json()["tags"]],
+            [primary.id, later_primary.id, secondary.id],
+        )
+
     def test_tag_fulltext_search_uses_id_subquery(self):
         application = self.bootstrap_extensions("tags")
         matched_by_name = Tag.objects.create(name="Subquery Support", slug="subquery-help")
