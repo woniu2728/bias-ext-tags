@@ -2239,6 +2239,11 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(payload["data"]["attributes"]["name"], "JSONAPI 子标签")
         self.assertTrue(payload["data"]["attributes"]["isChild"])
         self.assertNotIn("lastPostedDiscussion", payload["data"]["attributes"])
+        self.assertNotIn("default_sort", payload["data"]["attributes"])
+        self.assertNotIn("is_hidden", payload["data"]["attributes"])
+        self.assertNotIn("is_primary", payload["data"]["attributes"])
+        self.assertNotIn("is_restricted", payload["data"]["attributes"])
+        self.assertNotIn("parent_id", payload["data"]["attributes"])
         self.assertEqual(
             payload["data"]["relationships"]["parent"]["data"],
             {"type": "tags", "id": str(self.public_tag.id)},

@@ -4,6 +4,7 @@ from bias_core.extensions import (
     ResourceFieldDefinition,
     ResourceRelationshipDefinition,
 )
+from bias_core.extensions.platform import wants_jsonapi_response
 from bias_ext_tags.backend.constants import EXTENSION_ID
 from bias_ext_tags.backend.models import Tag
 from bias_ext_tags.backend.tag_resource import TagResource
@@ -150,6 +151,28 @@ def tag_resource_relationship_definitions():
 
 def serialize_tag_base(tag, context: dict) -> dict:
     from bias_ext_tags.backend.services import TagService
+
+    if wants_jsonapi_response(context):
+        payload = {
+            "id": tag.id,
+            "name": tag.name,
+            "slug": resolve_tag_slug(tag, context),
+            "description": tag.description,
+            "color": tag.color,
+            "icon": tag.icon,
+            "position": tag.position,
+            "defaultSort": tag.default_sort,
+            "isHidden": tag.is_hidden,
+            "isPrimary": TagService.is_primary_tree_tag(tag),
+            "isChild": TagService.is_child_tag(tag),
+            "discussionCount": tag.discussion_count,
+            "lastPostedAt": tag.last_posted_at,
+        }
+        if can_view_tag_stored_slug(tag, context):
+            payload["storedSlug"] = tag.slug
+        if can_view_tag_admin_fields(context):
+            payload["isRestricted"] = tag.is_restricted
+        return payload
 
     payload = {
         "id": tag.id,

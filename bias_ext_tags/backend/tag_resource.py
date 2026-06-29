@@ -164,22 +164,27 @@ class TagResource(DatabaseResource):
             ResourceField("default_sort", resolver=lambda tag, context: tag.default_sort, module_id=EXTENSION_ID)
             .string()
             .writable_when()
-            .nullable_field(),
+            .nullable_field()
+            .plain_only(),
             ResourceField("is_hidden", resolver=lambda tag, context: tag.is_hidden, module_id=EXTENSION_ID)
             .boolean()
-            .writable_when(),
+            .writable_when()
+            .plain_only(),
             ResourceField("is_primary", resolver=_resolve_tag_is_primary, module_id=EXTENSION_ID)
             .boolean()
             .writable_when()
-            .set_with(_set_tag_is_primary),
+            .set_with(_set_tag_is_primary)
+            .plain_only(),
             ResourceField("is_restricted", resolver=lambda tag, context: tag.is_restricted, module_id=EXTENSION_ID)
             .boolean()
             .writable_when()
-            .visible_when(_can_view_tag_admin_fields),
+            .visible_when(_can_view_tag_admin_fields)
+            .plain_only(),
             ResourceField("parent_id", resolver=lambda tag, context: tag.parent_id, module_id=EXTENSION_ID)
             .integer()
             .writable_when()
-            .nullable_field(),
+            .nullable_field()
+            .plain_only(),
             ResourceField("parentId", resolver=lambda tag, context: tag.parent_id, module_id=EXTENSION_ID)
             .integer()
             .writable_when()
