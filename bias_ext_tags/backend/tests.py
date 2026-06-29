@@ -1974,12 +1974,16 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
             parent=self.public_tag,
         )
 
-        with CaptureQueriesContext(connection) as queries:
+        with patch(
+            "bias_ext_tags.backend.handlers.TagService.get_forbidden_tag_ids",
+            wraps=TagService.get_forbidden_tag_ids,
+        ) as get_forbidden_tag_ids, CaptureQueriesContext(connection) as queries:
             response = self.client.get("/api/tags", {"include_children": False})
 
         self.assertEqual(response.status_code, 200, response.content)
         public_tag = next(tag for tag in response.json()["data"] if tag["slug"] == self.public_tag.slug)
         self.assertEqual(public_tag["children"], [])
+        get_forbidden_tag_ids.assert_not_called()
         child_prefetch_queries = [
             query["sql"]
             for query in queries

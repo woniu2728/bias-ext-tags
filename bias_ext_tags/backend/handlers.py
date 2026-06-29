@@ -30,8 +30,14 @@ def _tag_resource_options(context, resource: str = "tag") -> ResourceQueryOption
 
 def _build_tag_serialize_context(user=None, action="view"):
     return {
-        "forbidden_tag_ids": set(TagService.get_forbidden_tag_ids(user, action=action)),
+        "forbidden_tag_ids": None,
     }
+
+
+def _get_forbidden_tag_ids(context, user=None, action="view"):
+    if context.get("forbidden_tag_ids") is None:
+        context["forbidden_tag_ids"] = set(TagService.get_forbidden_tag_ids(user, action=action))
+    return context["forbidden_tag_ids"]
 
 
 def _get_prefetched_children(tag):
@@ -49,7 +55,6 @@ def _serialize_tag(
     resource_options=None,
 ):
     context = context or _build_tag_serialize_context(user, action=action)
-    forbidden_tag_ids = context["forbidden_tag_ids"]
     resource_options = resource_options or ResourceQueryOptions()
     payload = _get_resource_registry().serialize(
         "tag",
@@ -62,6 +67,7 @@ def _serialize_tag(
         return payload
     children = []
     if include_children:
+        forbidden_tag_ids = _get_forbidden_tag_ids(context, user=user, action=action)
         children = [
             _serialize_tag(
                 child,
