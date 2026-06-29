@@ -11,10 +11,10 @@ def tag_endpoint_specs() -> tuple[dict, ...]:
         dispatch_tag_delete,
         dispatch_tag_index,
         dispatch_tag_popular,
-        dispatch_tag_show,
         dispatch_tag_show_by_slug,
         dispatch_tag_update,
     )
+    from bias_ext_tags.backend.handlers import core_show_tag_response
 
     return (
         {
@@ -43,10 +43,12 @@ def tag_endpoint_specs() -> tuple[dict, ...]:
         },
         {
             "name": "show",
-            "handler": dispatch_tag_show,
             "methods": ("GET",),
             "path": "/tags/{object_id}",
             "absolute_path": True,
+            "ability": "view",
+            "kind": "show",
+            "response_callback": core_show_tag_response,
         },
         {
             "name": "show-by-slug",
@@ -110,20 +112,18 @@ class TagResource(DatabaseResource):
 
         normalized = str(object_id or "").strip()
         if normalized.isdigit():
-            tag = self.scope(self.query(context), context).filter(id=int(normalized)).first()
+            tag = self.query(context).filter(id=int(normalized)).first()
             if tag is not None:
                 return tag
 
         tag = TagService.get_tag_by_url_slug(normalized)
         if tag is None:
             tag = TagService.get_tag_by_url_slug(normalized, driver="id_with_slug")
-        if tag is None:
-            return None
-        if not TagService.can_view_tag(tag, context.get("user")):
-            return None
         return tag
 
     def can(self, user, ability: str, instance, context) -> bool:
+        from django.core.exceptions import PermissionDenied
+
         from bias_core.extensions.runtime import has_runtime_forum_permission
         from bias_ext_tags.backend.services import TagService
 
@@ -134,5 +134,7 @@ class TagResource(DatabaseResource):
         if ability in {"delete", "tag.delete"}:
             return TagService.can_manage_tags(user, "tag.delete")
         if ability in {"view", "viewForum"} and instance is not None:
-            return TagService.can_view_tag(instance, user)
+            if not TagService.can_view_tag(instance, user):
+                raise PermissionDenied("没有权限查看此标签")
+            return True
         return super().can(user, ability, instance, context)

@@ -2652,8 +2652,9 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
 
     def test_tag_detail_static_route_uses_resource_endpoint_mutator(self):
         def mutate_endpoint(endpoint):
-            def handler(context):
-                payload = endpoint.handler(context)
+            def response_callback(context, response):
+                callback = endpoint.response_callback
+                payload = callback(context, response) if callback is not None else response
                 payload["mutated_by_resource_endpoint"] = True
                 return payload
 
@@ -2661,8 +2662,11 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
                 resource=endpoint.resource,
                 endpoint=endpoint.endpoint,
                 module_id="test",
-                handler=handler,
+                handler=endpoint.handler,
+                kind=endpoint.kind,
+                ability=endpoint.ability,
                 methods=endpoint.methods,
+                response_callback=response_callback,
             )
 
         registry = ResourceRegistry()
@@ -2700,11 +2704,14 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         by_slug = resource_object.find(self.public_tag.slug, {"user": self.member})
         set_active_slug_driver(Tag, "id_with_slug")
         by_id_slug = resource_object.find(f"{self.public_tag.id}-renamed", {"user": self.member})
+        restricted = resource_object.find(str(self.staff_tag.id), {"user": self.member})
 
         self.assertEqual(by_id.id, self.public_tag.id)
         self.assertEqual(by_slug.id, self.public_tag.id)
         self.assertEqual(by_id_slug.id, self.public_tag.id)
-        self.assertIsNone(resource_object.find(str(self.staff_tag.id), {"user": self.member}))
+        self.assertEqual(restricted.id, self.staff_tag.id)
+        with self.assertRaisesMessage(PermissionDenied, "没有权限查看此标签"):
+            resource_object.can(self.member, "view", restricted, {})
 
     def test_tag_resource_object_owns_public_resource_endpoint_definitions(self):
         registry = ResourceRegistry()
@@ -2716,7 +2723,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         }
 
         self.assertIn(("index", "/tags", True), routes)
-        self.assertIn(("show", "/tags/{object_id}", True), routes)
+        self.assertIn(("show", "/tags/{object_id}", False), routes)
         self.assertIn(("create", "/tags", True), routes)
         self.assertIn(("update", "/tags/{object_id}", True), routes)
         self.assertIn(("delete", "/tags/{object_id}", True), routes)
@@ -2747,6 +2754,18 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
 
         self.assertEqual(response.status_code, 403, response.content)
         self.assertIn("没有权限", response.json()["error"])
+
+    def test_tag_detail_jsonapi_error_response_uses_jsonapi_errors_document(self):
+        response = self.client.get(
+            f"/api/tags/{self.staff_tag.id}",
+            **self.jsonapi_header(),
+        )
+
+        self.assertEqual(response.status_code, 403, response.content)
+        payload = response.json()
+        self.assertIn("errors", payload)
+        self.assertEqual(payload["errors"][0]["status"], "403")
+        self.assertIn("没有权限", payload["errors"][0]["detail"])
 
     def test_tag_read_endpoints_do_not_refresh_stats(self):
         with patch("bias_ext_tags.backend.handlers.TagService.refresh_tag_stats") as refresh_stats:

@@ -469,6 +469,20 @@ def dispatch_tag_show(context):
     return _serialize_tag(tag, user=user, include_children=True, resource_options=resource_options)
 
 
+def core_show_tag_response(context, response):
+    user = context.get("user")
+    tag = context.get("result")
+    resource_options = _tag_resource_options(context)
+    if _wants_jsonapi_response(context):
+        if isinstance(response, dict):
+            return JsonResponse(
+                _flarum_jsonapi_document(response),
+                content_type="application/vnd.api+json",
+            )
+        return response
+    return _serialize_tag(tag, user=user, include_children=True, resource_options=resource_options)
+
+
 def dispatch_tag_show_by_slug(context):
     request = context["request"]
     user = context.get("user")

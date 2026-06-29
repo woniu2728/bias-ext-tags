@@ -214,6 +214,9 @@ def tag_resource_endpoints():
             auth_required=bool(spec.get("auth_required", False)),
             forum_permission=spec.get("forum_permission", ""),
             default_include=spec.get("default_include", ()),
+            kind=spec.get("kind", ""),
+            ability=spec.get("ability"),
+            response_callback=spec.get("response_callback"),
         )
         for spec in tag_endpoint_specs()
     )
