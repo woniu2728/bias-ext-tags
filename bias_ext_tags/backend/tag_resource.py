@@ -6,10 +6,10 @@ from bias_ext_tags.backend.models import Tag
 
 
 def tag_endpoint_specs() -> tuple[dict, ...]:
-    from bias_ext_tags.backend.resource_endpoints import (
+    from bias_ext_tags.backend.responses import (
         dispatch_tag_popular,
     )
-    from bias_ext_tags.backend.resource_endpoints import (
+    from bias_ext_tags.backend.responses import (
         core_delete_tag_response,
         core_index_tag_response,
         core_show_tag_response,
