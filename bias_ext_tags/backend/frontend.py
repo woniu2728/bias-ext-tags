@@ -47,6 +47,11 @@ def discussion_frontend_extender():
                     "as": "fetch",
                     "crossorigin": "anonymous",
                 },
+                {
+                    "href": "/api/discussions/?page=1&limit=20&tag=:slug",
+                    "as": "fetch",
+                    "crossorigin": "anonymous",
+                },
             ),
             order=31,
         )

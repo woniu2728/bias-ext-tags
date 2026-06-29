@@ -2391,13 +2391,17 @@ class TagForumSettingsTests(ExtensionRuntimeTestMixin, TestCase):
         guest_payload = guest_response.json()
         tags_extension = next(item for item in guest_payload["enabled_extensions"] if item["id"] == "tags")
         self.assertEqual(tags_extension["frontend_forum_entry"], "extensions/tags/frontend/forum/index.js")
-        self.assertTrue(
-            any(
-                route["path"] == "/tags"
-                and route["name"] == "tags"
-                and route["component"] == "./TagsView.vue"
-                for route in tags_extension["frontend_routes"]
-            )
+        frontend_routes = {route["name"]: route for route in tags_extension["frontend_routes"]}
+        self.assertEqual(frontend_routes["tags"]["path"], "/tags")
+        self.assertEqual(frontend_routes["tags"]["component"], "./TagsView.vue")
+        self.assertIn(
+            "/api/tags?include_children=true",
+            {item["href"] for item in frontend_routes["tags"]["preloads"]},
+        )
+        self.assertEqual(frontend_routes["tag-detail"]["path"], "/t/:slug")
+        self.assertIn(
+            "/api/discussions/?page=1&limit=20&tag=:slug",
+            {item["href"] for item in frontend_routes["tag-detail"]["preloads"]},
         )
         self.assertFalse(guest_payload["can_bypass_tag_counts"])
         self.assertEqual([item["slug"] for item in guest_payload["tags"]], ["announcements"])
