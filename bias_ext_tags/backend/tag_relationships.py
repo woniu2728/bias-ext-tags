@@ -74,8 +74,8 @@ def serialize_discussion_tag_summaries(discussion) -> list[dict]:
     ]
 
 
-def replace_discussion_tags(discussion, tags: Iterable) -> dict:
-    previous_links = get_discussion_tag_links(discussion)
+def replace_discussion_tags(discussion, tags: Iterable, *, previous_links: Iterable | None = None) -> dict:
+    previous_links = tuple(previous_links) if previous_links is not None else tuple(get_discussion_tag_links(discussion))
     previous_tags = tuple(
         link.tag
         for link in previous_links

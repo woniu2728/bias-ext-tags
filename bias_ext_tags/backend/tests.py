@@ -3523,6 +3523,38 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
             f"Replacing discussion tags should load the previous tag relation once: {previous_tag_selects}",
         )
 
+    def test_set_discussion_tags_reuses_previous_tag_snapshot_for_permission_and_replace(self):
+        from bias_ext_tags.backend.discussion_relationships import set_discussion_tags_relationship
+
+        first_tag = Tag.objects.create(name="复用旧标签", slug="reuse-old-tag", color="#2980b9")
+        second_tag = Tag.objects.create(name="复用新标签", slug="reuse-new-tag", color="#e67e22")
+        discussion = create_runtime_discussion(
+            title="Reuse previous tags",
+            content="Initial content",
+            user=self.author,
+            extension_payload=discussion_tags_payload([first_tag.id]),
+        )
+
+        with CaptureQueriesContext(connection) as queries:
+            set_discussion_tags_relationship(
+                discussion,
+                {"data": [{"type": "tag", "id": str(second_tag.id)}]},
+                {"user": self.author},
+            )
+
+        previous_tag_selects = [
+            query["sql"]
+            for query in queries
+            if re.match(r'^\s*select\b', query["sql"].lower())
+            and re.search(r'\bfrom\s+["`]?discussion_tag["`]?', query["sql"].lower())
+            and re.search(r'["`]?discussion_id["`]?\s*=\s*\d+\b', query["sql"].lower())
+        ]
+        self.assertEqual(
+            len(previous_tag_selects),
+            1,
+            f"Retag permission and replacement should share the previous tag snapshot: {previous_tag_selects}",
+        )
+
     def test_replacing_discussion_tags_skips_write_when_tags_are_unchanged(self):
         from bias_ext_tags.backend.tag_relationships import replace_discussion_tags
 

@@ -665,13 +665,23 @@ class TagService:
         return tags
 
     @staticmethod
-    def ensure_can_change_discussion_tags(user: Any, discussion, tag_ids: Optional[List[int]]) -> List[Tag]:
+    def ensure_can_change_discussion_tags(
+        user: Any,
+        discussion,
+        tag_ids: Optional[List[int]],
+        *,
+        existing_tag_ids: Optional[List[int] | tuple[int, ...] | set[int]] = None,
+    ) -> List[Tag]:
         tags = TagService.get_tags_for_selection(tag_ids)
         if not TagService.can_tag_discussion(discussion, user):
             raise PermissionDenied("没有权限修改此讨论的标签")
         TagService.validate_tag_count_limits(tags, user=user)
 
-        old_tag_ids = set(get_discussion_tag_ids_for_stats(discussion))
+        old_tag_ids = (
+            set(get_discussion_tag_ids_for_stats(discussion))
+            if existing_tag_ids is None
+            else {int(tag_id) for tag_id in existing_tag_ids if tag_id}
+        )
         for tag in tags:
             if tag.id not in old_tag_ids and not TagService.can_add_to_discussion(tag, user):
                 raise PermissionDenied(f"没有权限将标签“{tag.name}”添加到讨论")
