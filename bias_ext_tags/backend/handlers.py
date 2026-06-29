@@ -483,6 +483,12 @@ def core_show_tag_response(context, response):
     return _serialize_tag(tag, user=user, include_children=True, resource_options=resource_options)
 
 
+def core_delete_tag_response(context, response):
+    if _wants_jsonapi_response(context):
+        return response
+    return {"message": "标签已删除"}
+
+
 def dispatch_tag_show_by_slug(context):
     request = context["request"]
     user = context.get("user")

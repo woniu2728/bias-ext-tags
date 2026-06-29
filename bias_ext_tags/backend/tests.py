@@ -301,7 +301,8 @@ class TagsExtensionRuntimeTests(ExtensionRuntimeTestMixin, TestCase):
 
         self.assertEqual(endpoints["create"].forum_permission, "tag.create")
         self.assertEqual(endpoints["update"].forum_permission, "tag.edit")
-        self.assertEqual(endpoints["delete"].forum_permission, "tag.delete")
+        self.assertEqual(endpoints["delete"].kind, "delete")
+        self.assertEqual(endpoints["delete"].ability, "delete")
 
     def test_tag_parent_relationship_declares_flarum_writable_condition(self):
         application = self.bootstrap_extensions("tags")
@@ -2208,6 +2209,18 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(response.content, b"")
         self.assertFalse(Tag.objects.filter(id=tag.id).exists())
 
+    def test_tag_delete_keeps_plain_bias_response_by_default(self):
+        tag = Tag.objects.create(name="Plain 删除", slug="plain-delete")
+
+        response = self.client.delete(
+            f"/api/tags/{tag.id}",
+            **self.auth_header(self.admin),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["message"], "标签已删除")
+        self.assertFalse(Tag.objects.filter(id=tag.id).exists())
+
     def test_tag_update_without_parent_field_preserves_existing_parent(self):
         child = Tag.objects.create(
             name="保留父级",
@@ -2726,7 +2739,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertIn(("show", "/tags/{object_id}", False), routes)
         self.assertIn(("create", "/tags", True), routes)
         self.assertIn(("update", "/tags/{object_id}", True), routes)
-        self.assertIn(("delete", "/tags/{object_id}", True), routes)
+        self.assertIn(("delete", "/tags/{object_id}", False), routes)
 
     def test_tag_resource_object_serializes_related_tag_models_through_core_jsonapi_serializer(self):
         child = Tag.objects.create(

@@ -8,13 +8,12 @@ from bias_ext_tags.backend.models import Tag
 def tag_endpoint_specs() -> tuple[dict, ...]:
     from bias_ext_tags.backend.handlers import (
         dispatch_tag_create,
-        dispatch_tag_delete,
         dispatch_tag_index,
         dispatch_tag_popular,
         dispatch_tag_show_by_slug,
         dispatch_tag_update,
     )
-    from bias_ext_tags.backend.handlers import core_show_tag_response
+    from bias_ext_tags.backend.handlers import core_delete_tag_response, core_show_tag_response
 
     return (
         {
@@ -68,12 +67,13 @@ def tag_endpoint_specs() -> tuple[dict, ...]:
         },
         {
             "name": "delete",
-            "handler": dispatch_tag_delete,
             "methods": ("DELETE",),
             "path": "/tags/{object_id}",
             "absolute_path": True,
             "auth_required": True,
-            "forum_permission": "tag.delete",
+            "ability": "delete",
+            "kind": "delete",
+            "response_callback": core_delete_tag_response,
         },
     )
 
@@ -138,3 +138,8 @@ class TagResource(DatabaseResource):
                 raise PermissionDenied("没有权限查看此标签")
             return True
         return super().can(user, ability, instance, context)
+
+    def delete_action(self, instance, context) -> None:
+        from bias_ext_tags.backend.services import TagService
+
+        TagService.delete_tag(instance.id, context.get("user"))
