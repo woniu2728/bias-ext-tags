@@ -2753,7 +2753,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         )
 
         with patch(
-            "bias_ext_tags.backend.resource_endpoints.TagService.get_forbidden_tag_ids",
+            "bias_ext_tags.backend.responses.TagService.get_forbidden_tag_ids",
             wraps=TagService.get_forbidden_tag_ids,
         ) as get_forbidden_tag_ids, CaptureQueriesContext(connection) as queries:
             response = self.client.get("/api/tags", {"include_children": False})
@@ -3154,7 +3154,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertIn("没有权限", payload["errors"][0]["detail"])
 
     def test_tag_read_endpoints_do_not_refresh_stats(self):
-        with patch("bias_ext_tags.backend.resource_endpoints.TagService.refresh_tag_stats") as refresh_stats:
+        with patch("bias_ext_tags.backend.responses.TagService.refresh_tag_stats") as refresh_stats:
             list_response = self.client.get("/api/tags")
             popular_response = self.client.get("/api/tags/popular")
 
