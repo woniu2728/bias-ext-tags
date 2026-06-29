@@ -3263,6 +3263,30 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(document["included"][0]["links"]["self"], f"/api/tags/{self.public_tag.id}")
         self.assertEqual(document["included"][0]["id"], str(self.public_tag.id))
 
+    def test_tag_parent_jsonapi_linkage_uses_parent_id_without_resolving_relation_when_not_included(self):
+        child = Tag.objects.create(
+            name="父级 linkage 子标签",
+            slug="parent-linkage-child",
+            parent=self.public_tag,
+            position=1,
+        )
+        registry = get_resource_registry()
+
+        with patch("bias_ext_tags.backend.resources.resolve_tag_parent") as resolve_parent:
+            with CaptureQueriesContext(connection) as queries:
+                document = registry.serialize_jsonapi_document("tag", child, {"user": self.admin})
+
+        self.assertEqual(document["data"]["relationships"]["parent"]["data"], {"type": "tags", "id": str(self.public_tag.id)})
+        resolve_parent.assert_not_called()
+        parent_fetches = [
+            query["sql"]
+            for query in queries
+            if 'from "tags"' in query["sql"].lower()
+            and f'"tags"."id" = {self.public_tag.id}' in query["sql"]
+            and "limit 21" in query["sql"].lower()
+        ]
+        self.assertEqual(parent_fetches, [])
+
     def test_guest_cannot_view_staff_tag_detail(self):
         response = self.client.get(f"/api/tags/{self.staff_tag.id}")
 

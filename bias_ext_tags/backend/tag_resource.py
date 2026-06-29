@@ -177,6 +177,7 @@ class TagResource(DatabaseResource):
             ResourceRelationship("parent", resolver=_resolve_tag_parent, module_id=EXTENSION_ID)
             .to_one("tag")
             .nullable_field()
+            .with_foreign_key_linkage("parent_id", condition=_can_link_tag_parent_id)
             .set_relationship_with(_set_tag_parent_relationship)
             .writable_when(_tag_parent_relationship_writable),
             ResourceRelationship("children", resolver=_resolve_tag_children, module_id=EXTENSION_ID)
@@ -385,6 +386,33 @@ def _resolve_tag_parent(tag, context):
     from bias_ext_tags.backend.resources import resolve_tag_parent
 
     return resolve_tag_parent(tag, context)
+
+
+def _can_link_tag_parent_id(tag, context) -> bool:
+    parent_id = getattr(tag, "parent_id", None)
+    if not parent_id:
+        return True
+    user = context.get("user")
+    if user and (getattr(user, "is_staff", False) or getattr(user, "is_superuser", False)):
+        return True
+    field_cache = getattr(getattr(tag, "_state", None), "fields_cache", {})
+    parent = field_cache.get("parent") if isinstance(field_cache, dict) else None
+    if parent is not None:
+        from bias_ext_tags.backend.services import TagService
+
+        return TagService.can_view_tag(parent, user)
+
+    cache = context.setdefault("_tag_parent_linkage_visibility", {})
+    if parent_id not in cache:
+        from bias_ext_tags.backend.services import TagService
+
+        queryset = TagService.filter_tags_for_user(
+            Tag.objects.filter(id=parent_id),
+            user,
+            action=context.get("action") or "view",
+        )
+        cache[parent_id] = queryset.exists()
+    return bool(cache[parent_id])
 
 
 def _resolve_tag_children(tag, context):
