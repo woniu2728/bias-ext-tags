@@ -13,6 +13,7 @@ from io import StringIO
 from unittest.mock import Mock, patch
 
 from bias_core.extensions import ResourceEndpointDefinition, SearchFilterDefinition
+from bias_core.resource_errors import JsonApiForbidden, JsonApiValidationError
 from bias_core.resource_objects import ResourceSearchCriteria
 from bias_core.extensions.testing import (
     AuditLog,
@@ -46,6 +47,16 @@ def _runtime_facade(name: str):
     from importlib import import_module
 
     return getattr(import_module("bias_core.extensions.runtime"), name)
+
+
+def _resource_field_rule_value(rule):
+    if isinstance(rule, dict) and "rule" in rule:
+        return rule["rule"]
+    return rule
+
+
+def _resource_field_has_rule(field, expected) -> bool:
+    return any(_resource_field_rule_value(rule) == expected for rule in field.validation_rules)
 
 
 def approve_runtime_discussion(*args, **kwargs):
@@ -2109,6 +2120,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(payload["data"]["id"], str(child.id))
         self.assertEqual(payload["data"]["attributes"]["name"], "JSONAPI 子标签")
         self.assertTrue(payload["data"]["attributes"]["isChild"])
+        self.assertNotIn("lastPostedDiscussion", payload["data"]["attributes"])
         self.assertEqual(
             payload["data"]["relationships"]["parent"]["data"],
             {"type": "tags", "id": str(self.public_tag.id)},
@@ -2740,6 +2752,183 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertIn(("create", "/tags", True), routes)
         self.assertIn(("update", "/tags/{object_id}", True), routes)
         self.assertIn(("delete", "/tags/{object_id}", False), routes)
+
+    def test_tag_resource_object_owns_flarum_writable_field_contract(self):
+        registry = ResourceRegistry()
+        registry.register_resource(TagResource())
+        fields = {
+            field.field: field
+            for field in registry.get_effective_fields("tag", {"user": self.admin})
+        }
+        relationships = {
+            relationship.relationship: relationship
+            for relationship in registry.get_effective_relationships("tag", {"user": self.admin})
+        }
+
+        self.assertTrue(fields["name"].writable)
+        self.assertTrue(fields["name"].required_on_create)
+        self.assertTrue(_resource_field_has_rule(fields["name"], ("max_length", 100)))
+        self.assertTrue(fields["description"].nullable)
+        self.assertTrue(_resource_field_has_rule(fields["description"], ("max_length", 700)))
+        self.assertTrue(fields["slug"].writable)
+        self.assertTrue(fields["slug"].required_on_create)
+        self.assertTrue(_resource_field_has_rule(fields["slug"], ("max_length", 100)))
+        self.assertTrue(any(_resource_field_rule_value(rule)[0] == "regex" for rule in fields["slug"].validation_rules))
+        self.assertTrue(fields["color"].writable)
+        self.assertTrue(fields["color"].nullable)
+        self.assertTrue(fields["isHidden"].writable)
+        self.assertTrue(fields["isPrimary"].writable)
+        self.assertFalse(fields["isRestricted"].writable(None, {"creating": True}))
+        self.assertTrue(fields["isRestricted"].writable(self.public_tag, {"creating": False}))
+        self.assertTrue(fields["defaultSort"].writable)
+        self.assertEqual(relationships["parent"].resource_type, "tag")
+        self.assertFalse(relationships["parent"].many)
+        self.assertTrue(relationships["parent"].writable(None, {"payload": {"data": {"attributes": {"isPrimary": True}}}}))
+        self.assertFalse(relationships["parent"].writable(None, {"payload": {"data": {"attributes": {"isPrimary": False}}}}))
+        self.assertEqual(relationships["children"].resource_type, "tag")
+        self.assertTrue(relationships["children"].many)
+        self.assertEqual(relationships["lastPostedDiscussion"].resource_type, "discussion")
+
+    def test_tag_resource_payload_applies_flarum_writable_fields_and_parent_relationship(self):
+        registry = ResourceRegistry()
+        registry.register_resource(TagResource())
+        tag = Tag()
+        context = {
+            "user": self.admin,
+            "payload": {
+                "data": {
+                    "type": "tag",
+                    "attributes": {
+                        "name": "Pipeline 标签",
+                        "slug": "pipeline-tag",
+                        "description": None,
+                        "color": "#abc",
+                        "icon": None,
+                        "isHidden": True,
+                        "isPrimary": True,
+                        "defaultSort": "latest",
+                    },
+                    "relationships": {
+                        "parent": {"data": {"type": "tag", "id": str(self.public_tag.id)}},
+                    },
+                },
+            },
+        }
+
+        registry.apply_resource_payload(
+            "tag",
+            tag,
+            {
+                "name": "Pipeline 标签",
+                "slug": "pipeline-tag",
+                "description": None,
+                "color": "#abc",
+                "icon": None,
+                "isHidden": True,
+                "isPrimary": True,
+                "defaultSort": "latest",
+            },
+            context,
+            creating=True,
+        )
+
+        self.assertEqual(tag.name, "Pipeline 标签")
+        self.assertEqual(tag.slug, "pipeline-tag")
+        self.assertIsNone(tag.description)
+        self.assertEqual(tag.color, "#abc")
+        self.assertIsNone(tag.icon)
+        self.assertTrue(tag.is_hidden)
+        self.assertTrue(tag.is_primary)
+        self.assertEqual(tag.default_sort, "latest")
+        self.assertEqual(tag.parent_id, self.public_tag.id)
+
+    def test_tag_resource_payload_validates_flarum_schema_rules(self):
+        registry = ResourceRegistry()
+        registry.register_resource(TagResource())
+
+        with self.assertRaisesMessage(JsonApiValidationError, "缺少必填字段: name"):
+            registry.apply_resource_payload(
+                "tag",
+                Tag(),
+                {"slug": "missing-name"},
+                {
+                    "user": self.admin,
+                    "payload": {"data": {"type": "tag", "attributes": {"slug": "missing-name"}}},
+                },
+                creating=True,
+            )
+
+        with self.assertRaisesMessage(JsonApiValidationError, "slug format is invalid"):
+            registry.apply_resource_payload(
+                "tag",
+                Tag(),
+                {"name": "Invalid Slug", "slug": "has space"},
+                {
+                    "user": self.admin,
+                    "payload": {
+                        "data": {
+                            "type": "tag",
+                            "attributes": {"name": "Invalid Slug", "slug": "has space"},
+                        },
+                    },
+                },
+                creating=True,
+            )
+
+        with self.assertRaisesMessage(JsonApiValidationError, "isHidden must be a boolean"):
+            registry.apply_resource_payload(
+                "tag",
+                Tag(),
+                {"name": "Bool", "slug": "bool", "isHidden": "yes"},
+                {
+                    "user": self.admin,
+                    "payload": {
+                        "data": {
+                            "type": "tag",
+                            "attributes": {"name": "Bool", "slug": "bool", "isHidden": "yes"},
+                        },
+                    },
+                },
+                creating=True,
+            )
+
+        with self.assertRaisesMessage(JsonApiValidationError, "color must be a valid hex color"):
+            registry.apply_resource_payload(
+                "tag",
+                Tag(),
+                {"name": "Color", "slug": "color", "color": "red"},
+                {
+                    "user": self.admin,
+                    "payload": {
+                        "data": {
+                            "type": "tag",
+                            "attributes": {"name": "Color", "slug": "color", "color": "red"},
+                        },
+                    },
+                },
+                creating=True,
+            )
+
+        with self.assertRaises(JsonApiForbidden):
+            registry.apply_resource_payload(
+                "tag",
+                Tag(),
+                {"name": "Restricted", "slug": "restricted", "isRestricted": True},
+                {
+                    "user": self.admin,
+                    "payload": {
+                        "data": {
+                            "type": "tag",
+                            "attributes": {
+                                "name": "Restricted",
+                                "slug": "restricted",
+                                "isRestricted": True,
+                            },
+                        },
+                    },
+                },
+                creating=True,
+            )
 
     def test_tag_resource_object_serializes_related_tag_models_through_core_jsonapi_serializer(self):
         child = Tag.objects.create(
