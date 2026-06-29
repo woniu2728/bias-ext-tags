@@ -3493,6 +3493,36 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
             [second_tag.slug],
         )
 
+    def test_replacing_discussion_tags_loads_previous_tags_once(self):
+        from bias_ext_tags.backend.tag_relationships import replace_discussion_tags
+
+        first_tag = Tag.objects.create(name="一次读取旧标签", slug="single-load-old-tag", color="#2980b9")
+        second_tag = Tag.objects.create(name="一次读取新标签", slug="single-load-new-tag", color="#e67e22")
+        discussion = create_runtime_discussion(
+            title="Single load retag",
+            content="Initial content",
+            user=self.author,
+            extension_payload=discussion_tags_payload([first_tag.id]),
+        )
+
+        with CaptureQueriesContext(connection) as queries:
+            result = replace_discussion_tags(discussion, (second_tag,))
+
+        self.assertEqual(result["previous_tag_ids"], (first_tag.id,))
+        self.assertEqual(result["previous_tag_names"], (first_tag.name,))
+        previous_tag_selects = [
+            query["sql"]
+            for query in queries
+            if re.match(r'^\s*select\b', query["sql"].lower())
+            and re.search(r'\bfrom\s+["`]?discussion_tag["`]?', query["sql"].lower())
+            and re.search(r'["`]?discussion_id["`]?\s*=\s*\d+\b', query["sql"].lower())
+        ]
+        self.assertEqual(
+            len(previous_tag_selects),
+            1,
+            f"Replacing discussion tags should load the previous tag relation once: {previous_tag_selects}",
+        )
+
     def test_updating_discussion_tags_creates_discussion_tagged_event_post(self):
         member_group = Group.objects.create(name="DiscussionTagEditor", color="#4d698e")
         Permission.objects.create(group=member_group, permission="startDiscussion")

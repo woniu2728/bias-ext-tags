@@ -26,6 +26,16 @@ def get_discussion_tags(discussion) -> list:
 
 
 def get_discussion_tag_ids(discussion) -> tuple[int, ...]:
+    prefetched = getattr(discussion, "_prefetched_objects_cache", {})
+    if "discussion_tags" in prefetched:
+        return tuple(
+            sorted(
+                link.tag_id
+                for link in prefetched["discussion_tags"]
+                if getattr(link, "tag_id", None) is not None
+            )
+        )
+
     links = getattr(discussion, "discussion_tags", None)
     if links is not None and hasattr(links, "order_by"):
         return tuple(links.order_by("tag_id").values_list("tag_id", flat=True))
@@ -65,8 +75,18 @@ def serialize_discussion_tag_summaries(discussion) -> list[dict]:
 
 
 def replace_discussion_tags(discussion, tags: Iterable) -> dict:
-    previous_tag_ids = get_discussion_tag_ids(discussion)
-    previous_tag_names = get_discussion_tag_names(discussion)
+    previous_links = get_discussion_tag_links(discussion)
+    previous_tags = tuple(
+        link.tag
+        for link in previous_links
+        if getattr(link, "tag", None) is not None
+    )
+    previous_tag_ids = tuple(sorted(
+        tag.id
+        for tag in previous_tags
+        if getattr(tag, "id", None) is not None
+    ))
+    previous_tag_names = tuple(tag.name for tag in sorted(previous_tags, key=lambda item: item.name))
     normalized_tags = tuple(tags or ())
 
     DiscussionTag.objects.filter(discussion=discussion).delete()
