@@ -73,7 +73,6 @@ from bias_ext_tags.backend.resources import (
     forum_resource_relationship_definitions,
     resolve_discussion_tagged_event_data,
     tag_resource_definition,
-    tag_resource_endpoints,
     tag_resource_field_definitions,
     tag_resource_relationship_definitions,
 )
@@ -198,8 +197,7 @@ def resource_extenders():
         .add_default_include(("show",), ("tags", "tags.parent")),
         ApiResourceExtender(tag_resource_definition())
         .fields(tag_resource_field_definitions)
-        .relationships(tag_resource_relationship_definitions)
-        .endpoints(tag_resource_endpoints),
+        .relationships(tag_resource_relationship_definitions),
         ConditionalExtender().when_extension_enabled("flags", flag_resource_extenders),
     )
 

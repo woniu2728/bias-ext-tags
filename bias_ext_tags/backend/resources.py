@@ -1,31 +1,17 @@
 from __future__ import annotations
 
 from bias_core.extensions import (
-    ResourceDefinition,
     ResourceEndpointDefinition,
     ResourceFieldDefinition,
     ResourceRelationshipDefinition,
 )
 from bias_ext_tags.backend.constants import EXTENSION_ID
-from bias_ext_tags.backend.handlers import (
-    dispatch_tag_create,
-    dispatch_tag_delete,
-    dispatch_tag_index,
-    dispatch_tag_popular,
-    dispatch_tag_show,
-    dispatch_tag_show_by_slug,
-    dispatch_tag_update,
-)
 from bias_ext_tags.backend.models import Tag
+from bias_ext_tags.backend.tag_resource import TagResource, tag_endpoint_specs
 
 
 def tag_resource_definition():
-    return ResourceDefinition(
-        resource="tag",
-        module_id=EXTENSION_ID,
-        resolver=serialize_tag_base,
-        description="论坛标签主资源。",
-    )
+    return TagResource()
 
 
 def tag_resource_definitions():
@@ -216,77 +202,20 @@ def tag_resource_relationship_definitions():
 
 
 def tag_resource_endpoints():
-    return (
+    return tuple(
         ResourceEndpointDefinition(
             resource="tag",
-            endpoint="create",
+            endpoint=spec["name"],
             module_id=EXTENSION_ID,
-            handler=dispatch_tag_create,
-            methods=("POST",),
-            path="/tags",
-            absolute_path=True,
-            auth_required=True,
-            forum_permission="tag.create",
-        ),
-        ResourceEndpointDefinition(
-            resource="tag",
-            endpoint="index",
-            module_id=EXTENSION_ID,
-            handler=dispatch_tag_index,
-            methods=("GET",),
-            path="/tags",
-            absolute_path=True,
-            default_include=("parent",),
-        ),
-        ResourceEndpointDefinition(
-            resource="tag",
-            endpoint="popular",
-            module_id=EXTENSION_ID,
-            handler=dispatch_tag_popular,
-            methods=("GET",),
-            path="/tags/popular",
-            absolute_path=True,
-        ),
-        ResourceEndpointDefinition(
-            resource="tag",
-            endpoint="show",
-            module_id=EXTENSION_ID,
-            handler=dispatch_tag_show,
-            methods=("GET",),
-            path="/tags/{object_id}",
-            absolute_path=True,
-        ),
-        ResourceEndpointDefinition(
-            resource="tag",
-            endpoint="show-by-slug",
-            module_id=EXTENSION_ID,
-            handler=dispatch_tag_show_by_slug,
-            methods=("GET",),
-            path="/tags/slug/{object_id}",
-            absolute_path=True,
-        ),
-        ResourceEndpointDefinition(
-            resource="tag",
-            endpoint="update",
-            module_id=EXTENSION_ID,
-            handler=dispatch_tag_update,
-            methods=("PATCH",),
-            path="/tags/{object_id}",
-            absolute_path=True,
-            auth_required=True,
-            forum_permission="tag.edit",
-        ),
-        ResourceEndpointDefinition(
-            resource="tag",
-            endpoint="delete",
-            module_id=EXTENSION_ID,
-            handler=dispatch_tag_delete,
-            methods=("DELETE",),
-            path="/tags/{object_id}",
-            absolute_path=True,
-            auth_required=True,
-            forum_permission="tag.delete",
-        ),
+            handler=spec["handler"],
+            methods=spec.get("methods", ("GET",)),
+            path=spec.get("path", ""),
+            absolute_path=bool(spec.get("absolute_path", False)),
+            auth_required=bool(spec.get("auth_required", False)),
+            forum_permission=spec.get("forum_permission", ""),
+            default_include=spec.get("default_include", ()),
+        )
+        for spec in tag_endpoint_specs()
     )
 
 

@@ -37,6 +37,7 @@ from bias_ext_tags.backend.events import DiscussionTaggedEvent, TagStatsRefreshR
 from bias_ext_tags.backend.models import Tag
 from bias_ext_tags.backend.services import TagService
 from bias_ext_tags.backend.resources import tag_resource_endpoints
+from bias_ext_tags.backend.tag_resource import TagResource
 from bias_core.models import Setting
 from bias_core.settings_service import clear_runtime_setting_caches
 
@@ -2665,8 +2666,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
             )
 
         registry = ResourceRegistry()
-        for endpoint in tag_resource_endpoints():
-            registry.register_endpoint(endpoint)
+        registry.register_resource(TagResource())
         registry.register_endpoint(
             ResourceEndpointDefinition(
                 resource="tag",
@@ -2686,6 +2686,61 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
 
         self.assertEqual(response.status_code, 200, response.content)
         self.assertTrue(response.json()["mutated_by_resource_endpoint"])
+
+    def test_runtime_registry_registers_tag_as_database_resource_object(self):
+        registry = get_resource_registry()
+        resource_object = registry.get_resource_object("tag")
+
+        self.assertIsInstance(resource_object, TagResource)
+        self.assertEqual(resource_object.model, Tag)
+        self.assertEqual(resource_object.type(), "tag")
+        self.assertEqual(resource_object.resource_for(self.public_tag, {"user": self.admin}), "tag")
+
+        by_id = resource_object.find(str(self.public_tag.id), {"user": self.member})
+        by_slug = resource_object.find(self.public_tag.slug, {"user": self.member})
+        set_active_slug_driver(Tag, "id_with_slug")
+        by_id_slug = resource_object.find(f"{self.public_tag.id}-renamed", {"user": self.member})
+
+        self.assertEqual(by_id.id, self.public_tag.id)
+        self.assertEqual(by_slug.id, self.public_tag.id)
+        self.assertEqual(by_id_slug.id, self.public_tag.id)
+        self.assertIsNone(resource_object.find(str(self.staff_tag.id), {"user": self.member}))
+
+    def test_tag_resource_object_owns_public_resource_endpoint_definitions(self):
+        registry = ResourceRegistry()
+        registry.register_resource(TagResource())
+
+        routes = {
+            (endpoint.endpoint, endpoint.path, endpoint.handler is not None)
+            for endpoint in registry.get_dispatch_endpoints("tag")
+        }
+
+        self.assertIn(("index", "/tags", True), routes)
+        self.assertIn(("show", "/tags/{object_id}", True), routes)
+        self.assertIn(("create", "/tags", True), routes)
+        self.assertIn(("update", "/tags/{object_id}", True), routes)
+        self.assertIn(("delete", "/tags/{object_id}", True), routes)
+
+    def test_tag_resource_object_serializes_related_tag_models_through_core_jsonapi_serializer(self):
+        child = Tag.objects.create(
+            name="资源对象子标签",
+            slug="resource-object-child",
+            parent=self.public_tag,
+            position=1,
+        )
+        registry = get_resource_registry()
+
+        document = registry.serialize_jsonapi_document(
+            "tag",
+            child,
+            {"user": self.admin},
+            include=("parent",),
+        )
+
+        self.assertEqual(document["data"]["type"], "tag")
+        self.assertEqual(document["data"]["relationships"]["parent"]["data"], {"type": "tag", "id": str(self.public_tag.id)})
+        self.assertEqual(document["included"][0]["type"], "tag")
+        self.assertEqual(document["included"][0]["id"], str(self.public_tag.id))
 
     def test_guest_cannot_view_staff_tag_detail(self):
         response = self.client.get(f"/api/tags/{self.staff_tag.id}")
