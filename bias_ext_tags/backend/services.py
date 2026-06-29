@@ -882,7 +882,7 @@ class TagService:
             return runtime_tag
 
         try:
-            return Tag.objects.get(slug=slug)
+            return Tag.objects.get(slug__iexact=slug)
         except Tag.DoesNotExist:
             return None
 

@@ -22,7 +22,7 @@ class TagSlugDriver:
                 Tag.objects.all(),
                 (context or {}).get("user"),
                 action="view",
-            ).get(slug=unquote(str(slug or "").strip()))
+            ).get(slug__iexact=unquote(str(slug or "").strip()))
         except Tag.DoesNotExist:
             return None
 
@@ -31,7 +31,7 @@ class TagSlugDriver:
         from bias_ext_tags.backend.services import TagService
 
         decoded_to_input = {
-            unquote(str(slug or "").strip()): str(slug or "").strip()
+            unquote(str(slug or "").strip()).lower(): str(slug or "").strip()
             for slug in slugs or ()
             if str(slug or "").strip()
         }
@@ -41,9 +41,9 @@ class TagSlugDriver:
             action="view",
         )
         return {
-            decoded_to_input[tag.slug]: tag
+            decoded_to_input[tag.slug.lower()]: tag
             for tag in tags
-            if tag.slug in decoded_to_input
+            if tag.slug.lower() in decoded_to_input
         }
 
 

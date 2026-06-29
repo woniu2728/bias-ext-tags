@@ -2014,6 +2014,12 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(response.json()["slug"], "public-tag")
 
+    def test_tag_slug_detail_is_case_insensitive_for_default_slug(self):
+        response = self.client.get("/api/tags/slug/PUBLIC-TAG")
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["slug"], "public-tag")
+
     def test_tag_detail_static_route_uses_resource_endpoint_mutator(self):
         def mutate_endpoint(endpoint):
             def handler(context):
@@ -2384,6 +2390,33 @@ class TagSearchApiTests(ExtensionRuntimeTestMixin, TestCase):
         response = self.client.get(
             "/api/search",
             {"q": "搜索 tag:extension-search-tag", "type": "discussions"},
+            **self.auth_header(),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertEqual(payload["discussion_total"], 1)
+        self.assertEqual([item["id"] for item in payload["discussions"]], [matched.id])
+
+    def test_search_api_tag_filter_matches_slug_case_insensitively(self):
+        target_tag = Tag.objects.create(name="大小写搜索标签", slug="case-search-tag")
+        other_tag = Tag.objects.create(name="大小写其他标签", slug="case-other-tag")
+        matched = create_runtime_discussion(
+            title="大小写标签搜索命中",
+            content="case-insensitive-tag-keyword",
+            user=self.user,
+            extension_payload=discussion_tags_payload([target_tag.id]),
+        )
+        create_runtime_discussion(
+            title="大小写标签搜索未命中",
+            content="case-insensitive-tag-keyword",
+            user=self.user,
+            extension_payload=discussion_tags_payload([other_tag.id]),
+        )
+
+        response = self.client.get(
+            "/api/search",
+            {"q": "case-insensitive-tag-keyword tag:CASE-SEARCH-TAG", "type": "discussions"},
             **self.auth_header(),
         )
 
@@ -3309,6 +3342,26 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(response.json()["total"], 0)
         self.assertEqual(response.json()["data"], [])
+
+    def test_discussion_list_tag_filter_matches_slug_case_insensitively(self):
+        tag = Tag.objects.create(name="列表大小写标签", slug="case-list-tag")
+        matched = create_runtime_discussion(
+            title="列表大小写命中",
+            content="按大小写不敏感 slug 筛选。",
+            user=self.author,
+            extension_payload=discussion_tags_payload([tag.id]),
+        )
+        create_runtime_discussion(
+            title="列表大小写未命中",
+            content="不应被标签筛选命中。",
+            user=self.author,
+        )
+
+        response = self.client.get("/api/discussions/", {"tag": "CASE-LIST-TAG"})
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["total"], 1)
+        self.assertEqual(response.json()["data"][0]["id"], matched.id)
 
     def test_discussion_list_tag_filter_supports_untagged(self):
         tagged = Tag.objects.create(name="已标记", slug="tagged-filter")
