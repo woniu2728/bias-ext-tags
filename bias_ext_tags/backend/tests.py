@@ -2280,7 +2280,7 @@ class TagForumSettingsTests(ExtensionRuntimeTestMixin, TestCase):
         )
         self.assertFalse(guest_payload["can_bypass_tag_counts"])
         self.assertEqual([item["slug"] for item in guest_payload["tags"]], ["announcements"])
-        self.assertEqual(guest_payload["tags"][0]["children"][0]["slug"], "news")
+        self.assertEqual(guest_payload["tags"][0]["children"], [])
 
         staff_response = self.client.get("/api/forum", **self.auth_header())
         self.assertEqual(staff_response.status_code, 200, staff_response.content)
@@ -2290,6 +2290,29 @@ class TagForumSettingsTests(ExtensionRuntimeTestMixin, TestCase):
             [item["slug"] for item in staff_payload["tags"]],
             ["announcements", "staff"],
         )
+
+    def test_forum_settings_include_primary_and_limited_secondary_root_tags(self):
+        primary = Tag.objects.create(name="Forum Primary", slug="forum-primary", position=1)
+        Tag.objects.create(name="Forum Child Hidden From Summary", slug="forum-child-summary", parent=primary, position=1)
+        secondary_tags = [
+            Tag.objects.create(
+                name=f"Forum Secondary {index}",
+                slug=f"forum-secondary-{index}",
+                position=None,
+                is_primary=False,
+                discussion_count=10 - index,
+            )
+            for index in range(5)
+        ]
+
+        response = self.client.get("/api/forum")
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        slugs = [item["slug"] for item in payload["tags"]]
+        self.assertEqual(slugs, ["forum-primary", *[tag.slug for tag in secondary_tags[:4]]])
+        self.assertTrue(all(item["parent_id"] is None for item in payload["tags"]))
+        self.assertTrue(all(item["children"] == [] for item in payload["tags"]))
 
     def test_public_forum_settings_use_bypass_tag_counts_permission(self):
         bypass_group = Group.objects.create(name="BypassTagCounts", color="#4d698e")
@@ -2301,62 +2324,59 @@ class TagForumSettingsTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         self.assertTrue(response.json()["can_bypass_tag_counts"])
 
-    def test_forum_tag_tree_prefetches_child_last_posted_discussions(self):
+    def test_forum_tag_summary_prefetches_last_posted_discussions(self):
         permission_group = Group.objects.create(name="ForumTagTreePosting", color="#4d698e")
         Permission.objects.create(group=permission_group, permission="startDiscussion")
         Permission.objects.create(group=permission_group, permission="startDiscussionWithoutApproval")
         self.member.user_groups.add(permission_group)
-        parent = Tag.objects.create(name="Forum Parent", slug="forum-parent")
-        children = [
+        tags = [
             Tag.objects.create(
-                name=f"Forum Child {index}",
-                slug=f"forum-child-{index}",
-                parent=parent,
+                name=f"Forum Summary Tag {index}",
+                slug=f"forum-summary-tag-{index}",
                 position=index,
             )
             for index in range(6)
         ]
-        for tag in (parent, *children):
+        for tag in tags:
             Permission.objects.create(group=permission_group, permission=f"tag{tag.id}.startDiscussion")
-        for child in children:
+        for tag in tags:
             with self.captureOnCommitCallbacks(execute=True):
                 create_runtime_discussion(
-                    title=f"Child discussion {child.id}",
-                    content="Forum child last posted discussion.",
+                    title=f"Forum summary discussion {tag.id}",
+                    content="Forum summary last posted discussion.",
                     user=self.member,
-                    extension_payload=discussion_tags_payload([parent.id, child.id]),
+                    extension_payload=discussion_tags_payload([tag.id]),
                 )
 
         with CaptureQueriesContext(connection) as queries:
             response = self.client.get("/api/forum", **self.auth_header(self.member))
 
         self.assertEqual(response.status_code, 200, response.content)
-        payload_parent = next(item for item in response.json()["tags"] if item["slug"] == parent.slug)
-        self.assertEqual(len(payload_parent["children"]), len(children))
+        payload_tags = response.json()["tags"]
         self.assertTrue(
-            all(child["last_posted_discussion"] for child in payload_parent["children"])
+            all(item["last_posted_discussion"] for item in payload_tags)
         )
-        child_discussion_fetches = [
+        tag_discussion_fetches = [
             query["sql"]
             for query in queries
             if 'from "discussions"' in query["sql"].lower()
             and 'where "discussions"."id" =' in query["sql"].lower()
         ]
         self.assertEqual(
-            child_discussion_fetches,
+            tag_discussion_fetches,
             [],
-            "Forum tag tree should not issue per-child last_posted_discussion lookups.",
+            "Forum tag summary should not issue per-tag last_posted_discussion lookups.",
         )
-        child_parent_fetches = [
+        tag_parent_fetches = [
             query["sql"]
             for query in queries
             if 'from "tags"' in query["sql"].lower()
             and 'where "tags"."id" =' in query["sql"].lower()
         ]
         self.assertEqual(
-            child_parent_fetches,
+            tag_parent_fetches,
             [],
-            "Forum tag tree should not issue per-child parent tag lookups while resolving permissions.",
+            "Forum tag summary should not issue per-tag parent lookups while resolving permissions.",
         )
 
 

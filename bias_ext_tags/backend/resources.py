@@ -331,28 +331,30 @@ def resolve_discussion_tag_resources(discussion, context: dict) -> list[Tag]:
 
 
 def resolve_forum_tags(forum, context: dict) -> list[dict]:
-    from django.db.models import Prefetch
     from bias_ext_tags.backend.services import TagService
 
     user = context.get("user")
-    child_queryset = filter_runtime_tags_for_user(
-        Tag.objects.filter(is_hidden=False)
-        .select_related("last_posted_discussion")
-        .order_by(*TagService.child_order_by()),
-        user,
-        action="view",
-    )
-    child_queryset = TagService.prefetch_state_for_user(child_queryset, user)
-    queryset = filter_runtime_tags_for_user(
-        Tag.objects.filter(parent__isnull=True, is_hidden=False)
-        .select_related("last_posted_discussion")
-        .prefetch_related(Prefetch("children", queryset=child_queryset, to_attr="visible_children"))
+    primary_queryset = filter_runtime_tags_for_user(
+        Tag.objects.filter(parent__isnull=True, position__isnull=False, is_hidden=False)
+        .select_related("last_posted_discussion", "parent")
         .order_by(*TagService.structure_order_by()),
         user,
         action="view",
     )
-    queryset = TagService.prefetch_state_for_user(queryset, user)
-    return [_serialize_forum_tag(tag, context) for tag in queryset]
+    primary_queryset = TagService.prefetch_state_for_user(primary_queryset, user)
+    primary_tags = list(primary_queryset)
+
+    secondary_queryset = filter_runtime_tags_for_user(
+        Tag.objects.filter(parent__isnull=True, position__isnull=True, is_hidden=False)
+        .select_related("last_posted_discussion", "parent")
+        .order_by("-discussion_count", "name"),
+        user,
+        action="view",
+    )
+    secondary_queryset = TagService.prefetch_state_for_user(secondary_queryset, user)
+    secondary_tags = list(secondary_queryset[:4])
+
+    return [_serialize_forum_tag(tag, context, include_children=False) for tag in [*primary_tags, *secondary_tags]]
 
 
 def resolve_forum_can_bypass_tag_counts(forum, context: dict) -> bool:
