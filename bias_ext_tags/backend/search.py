@@ -32,7 +32,7 @@ def apply_post_tag_search_filter(queryset, tag_slug: str, context: dict):
 
 
 def apply_discussion_tag_list_query(queryset, context: dict):
-    tag_slug = _query_param_value((context or {}).get("params"), "tag")
+    tag_slug = _tag_query_param_value((context or {}).get("params"))
     if not tag_slug:
         return queryset
     return _apply_discussion_tag_filter(queryset, tag_slug, context)
@@ -45,7 +45,7 @@ def hide_hidden_tag_discussions_from_all_list(queryset, context: dict):
         _has_active_filters(context.get("active_filters"))
         or _has_value(context.get("query"))
         or _has_value(context.get("author"))
-        or _query_param_value(params, "tag")
+        or _tag_query_param_value(params)
         or str(context.get("filter") or "all").strip().lower() != "all"
     ):
         return queryset
@@ -206,6 +206,10 @@ def _query_param_value(params, key: str):
             if str(item or "").strip()
         ]
     return str(value or "").strip().lower()
+
+
+def _tag_query_param_value(params):
+    return _query_param_value(params, "tag") or _query_param_value(params, "filter[tag]")
 
 
 def _has_value(value) -> bool:

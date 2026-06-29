@@ -2983,6 +2983,28 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(payload["data"][0]["id"], life_discussion.id)
         self.assertEqual(payload["data"][0]["tags"][0]["slug"], life_tag.slug)
 
+    def test_discussion_list_accepts_json_api_filter_tag_param(self):
+        matched_tag = Tag.objects.create(name="JSON API 标签", slug="json-api-filter")
+        other_tag = Tag.objects.create(name="其他 JSON API 标签", slug="json-api-other")
+        matched = create_runtime_discussion(
+            title="JSON API 标签命中",
+            content="兼容 JSON API filter[tag] 查询参数。",
+            user=self.author,
+            extension_payload=discussion_tags_payload([matched_tag.id]),
+        )
+        create_runtime_discussion(
+            title="JSON API 标签未命中",
+            content="不应被 filter[tag] 命中。",
+            user=self.author,
+            extension_payload=discussion_tags_payload([other_tag.id]),
+        )
+
+        response = self.client.get("/api/discussions/", {"filter[tag]": matched_tag.slug})
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["total"], 1)
+        self.assertEqual([item["id"] for item in response.json()["data"]], [matched.id])
+
     def test_discussion_list_tag_filter_supports_comma_or_slugs(self):
         first_tag = Tag.objects.create(name="列表标签一", slug="list-filter-one")
         second_tag = Tag.objects.create(name="列表标签二", slug="list-filter-two")
@@ -3416,6 +3438,20 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
         )
 
         response = self.client.get("/api/discussions/", {"tag": hidden_tag.slug})
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual([item["id"] for item in response.json()["data"]], [discussion.id])
+
+    def test_hidden_tag_discussions_are_visible_when_filter_tag_param_is_active(self):
+        hidden_tag = Tag.objects.create(name="隐藏", slug="hidden-filter-json-api", is_hidden=True)
+        discussion = create_runtime_discussion(
+            title="隐藏标签 JSON API 过滤讨论",
+            content="filter[tag] 也应禁用全部列表隐藏标签排除。",
+            user=self.author,
+            extension_payload=discussion_tags_payload([hidden_tag.id]),
+        )
+
+        response = self.client.get("/api/discussions/", {"filter[tag]": hidden_tag.slug})
 
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual([item["id"] for item in response.json()["data"]], [discussion.id])
