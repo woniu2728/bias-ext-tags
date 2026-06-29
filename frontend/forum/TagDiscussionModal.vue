@@ -27,14 +27,20 @@
           <label for="tag-discussion-primary">{{ primaryLabelText }}</label>
           <select
             id="tag-discussion-primary"
-            v-model="form.primary_tag_id"
             name="primary_tag_id"
             class="modal-form-control"
-            :disabled="loading || submitting || !primaryTags.length"
+            :multiple="tagLimits.maxPrimary > 1"
+            :size="primarySelectSize"
+            :disabled="loading || submitting || tagLimits.maxPrimary <= 0 || !primaryTags.length"
             @change="handlePrimaryTagChange"
           >
             <option value="">{{ primaryPlaceholderText }}</option>
-            <option v-for="tag in primaryTags" :key="tag.id" :value="String(tag.id)">
+            <option
+              v-for="tag in primaryTags"
+              :key="tag.id"
+              :selected="form.primary_tag_ids.includes(String(tag.id))"
+              :value="String(tag.id)"
+            >
               {{ tag.name }}
             </option>
           </select>
@@ -44,13 +50,20 @@
           <label for="tag-discussion-secondary">{{ secondaryLabelText }}</label>
           <select
             id="tag-discussion-secondary"
-            v-model="form.secondary_tag_id"
             name="secondary_tag_id"
             class="modal-form-control"
-            :disabled="loading || submitting || !secondaryTagOptions.length"
+            :multiple="tagLimits.maxSecondary > 1"
+            :size="secondarySelectSize"
+            :disabled="loading || submitting || tagLimits.maxSecondary <= 0 || !secondaryTagOptions.length"
+            @change="handleSecondaryTagChange"
           >
             <option value="">{{ secondaryPlaceholderText }}</option>
-            <option v-for="tag in secondaryTagOptions" :key="tag.id" :value="String(tag.id)">
+            <option
+              v-for="tag in secondaryTagOptions"
+              :key="tag.id"
+              :selected="form.secondary_tag_ids.includes(String(tag.id))"
+              :value="String(tag.id)"
+            >
               {{ tag.name }}
             </option>
           </select>
@@ -80,18 +93,22 @@ import {
   useModalStore
 } from '@bias/core'
 import {
-  getUiCopy
+  getUiCopy,
+  useForumStore,
 } from '@bias/core/forum'
 import { normalizeDiscussion } from '@bias/discussions'
 import {
   flattenTags,
-  isChildTag,
   isPrimaryRootTag,
   isSecondaryRootTag,
   normalizeTag,
-  sortTagsByStructure,
   unwrapTagList,
 } from './tagUtils.js'
+import {
+  createTagSelectionState,
+  normalizeSelectionIds,
+  resolveTagSelectionLimits,
+} from './tagSelectionState.js'
 
 const props = defineProps({
   discussion: {
@@ -109,24 +126,25 @@ const loading = ref(false)
 const submitting = ref(false)
 const errorMessage = ref('')
 const tags = ref([])
+const forumStore = useForumStore()
 const form = reactive({
-  primary_tag_id: '',
-  secondary_tag_id: '',
+  primary_tag_ids: [],
+  secondary_tag_ids: [],
 })
 
-const primaryTags = computed(() => tags.value.filter(isPrimaryRootTag).sort(sortTagsByStructure))
-const rootSecondaryTags = computed(() => tags.value.filter(isSecondaryRootTag).sort(sortTagsByStructure))
-const secondaryTagOptions = computed(() => {
-  if (!form.primary_tag_id) return rootSecondaryTags.value
-  const primaryTag = primaryTags.value.find(tag => String(tag.id) === String(form.primary_tag_id))
-  return primaryTag?.children?.filter(isChildTag).sort(sortTagsByStructure) || []
-})
-const selectedTagIds = computed(() => {
-  return [form.primary_tag_id, form.secondary_tag_id]
-    .filter(Boolean)
-    .map(value => parseInt(value, 10))
-    .filter(Number.isInteger)
-})
+const tagLimits = computed(() => resolveTagSelectionLimits(forumStore.settings || {}))
+const selectionState = computed(() => createTagSelectionState({
+  tags: tags.value,
+  primaryTagIds: form.primary_tag_ids,
+  secondaryTagIds: form.secondary_tag_ids,
+  settings: forumStore.settings || {},
+}))
+const primaryTags = computed(() => selectionState.value.primaryTags)
+const rootSecondaryTags = computed(() => selectionState.value.rootSecondaryTags)
+const secondaryTagOptions = computed(() => selectionState.value.secondaryOptions)
+const selectedTagIds = computed(() => selectionState.value.selectedTagIds)
+const primarySelectSize = computed(() => tagLimits.value.maxPrimary > 1 ? Math.min(Math.max(primaryTags.value.length + 1, 3), 8) : undefined)
+const secondarySelectSize = computed(() => tagLimits.value.maxSecondary > 1 ? Math.min(Math.max(secondaryTagOptions.value.length + 1, 3), 8) : undefined)
 const hasChanged = computed(() => {
   const original = unwrapTagList(props.discussion?.tags)
     .map(tag => Number(tag?.id))
@@ -199,16 +217,41 @@ async function loadTags() {
 
 function syncDiscussionTags() {
   const currentTags = flattenTags(props.discussion?.tags || [])
-  const primaryTag = currentTags.find(isPrimaryRootTag)
-  const secondaryTag = currentTags.find(tag => isChildTag(tag) || isSecondaryRootTag(tag))
-  form.primary_tag_id = primaryTag?.id ? String(primaryTag.id) : ''
-  form.secondary_tag_id = secondaryTag?.id ? String(secondaryTag.id) : ''
+  form.primary_tag_ids = currentTags.filter(isPrimaryRootTag).map(tag => String(tag.id))
+  form.secondary_tag_ids = currentTags.filter(isSecondaryRootTag).map(tag => String(tag.id))
+  for (const tag of currentTags) {
+    if (tag?.parent_id) {
+      form.secondary_tag_ids.push(String(tag.id))
+    }
+  }
+  handlePrimaryTagChange()
 }
 
-function handlePrimaryTagChange() {
-  if (!secondaryTagOptions.value.some(option => String(option.id) === String(form.secondary_tag_id))) {
-    form.secondary_tag_id = ''
+function readSelectedOptionIds(event) {
+  const select = event?.target
+  if (!select?.multiple) {
+    return select?.value ? [String(select.value)] : []
   }
+  return Array.from(select.selectedOptions || [])
+    .map(option => String(option.value || ''))
+    .filter(Boolean)
+}
+
+function handlePrimaryTagChange(event) {
+  if (event) {
+    form.primary_tag_ids = readSelectedOptionIds(event)
+  }
+  const allowedSecondaryIds = new Set(secondaryTagOptions.value.map(tag => Number(tag.id)))
+  form.primary_tag_ids = selectionState.value.selectedPrimaryIds.map(String)
+  form.secondary_tag_ids = normalizeSelectionIds(form.secondary_tag_ids)
+    .filter(tagId => allowedSecondaryIds.has(tagId))
+    .slice(0, tagLimits.value.maxSecondary)
+    .map(String)
+}
+
+function handleSecondaryTagChange(event) {
+  form.secondary_tag_ids = readSelectedOptionIds(event)
+  form.secondary_tag_ids = selectionState.value.selectedSecondaryIds.map(String)
 }
 
 async function submit() {

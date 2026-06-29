@@ -23,6 +23,9 @@ import {
   normalizeTag,
   unwrapTagList,
 } from './tagUtils.js'
+import {
+  normalizeSelectionIds,
+} from './tagSelectionState.js'
 
 export const extend = [
   new Store()
@@ -624,17 +627,19 @@ function registerTagsForum(forum) {
     isVisible: ({ submitKind, discussion }) => submitKind === 'edit-discussion' && Array.isArray(discussion?.tags),
     contribute({ discussion }) {
       const currentTags = flattenTags(discussion.tags || [])
-      const primaryTag = currentTags.find(isPrimaryRootTag)
-      const secondaryTag = currentTags.find(tag => isChildTag(tag) || isSecondaryRootTag(tag))
-      const selectedTagIds = [primaryTag?.id, secondaryTag?.id]
-        .filter(Boolean)
-        .map(value => parseInt(value, 10))
+      const primaryTagIds = currentTags.filter(isPrimaryRootTag).map(tag => Number(tag.id)).filter(Number.isInteger)
+      const secondaryTagIds = currentTags
+        .filter(tag => isChildTag(tag) || isSecondaryRootTag(tag))
+        .map(tag => Number(tag.id))
         .filter(Number.isInteger)
+      const selectedTagIds = [...primaryTagIds, ...secondaryTagIds]
       return {
         extensions: {
           tags: {
-            primaryTagId: primaryTag?.id ? String(primaryTag.id) : '',
-            secondaryTagId: secondaryTag?.id ? String(secondaryTag.id) : '',
+            primaryTagId: primaryTagIds[0] ? String(primaryTagIds[0]) : '',
+            primaryTagIds: primaryTagIds.map(String),
+            secondaryTagId: secondaryTagIds[0] ? String(secondaryTagIds[0]) : '',
+            secondaryTagIds: secondaryTagIds.map(String),
             selectedTagIds,
           },
         },
@@ -648,7 +653,13 @@ function registerTagsForum(forum) {
     order: 20,
     isVisible: ({ type }) => type === 'discussion',
     contribute({ payload, extensionState }) {
-      const selectedTagIds = getTagsComposerState({ extensionState }).selectedTagIds || []
+      const state = getTagsComposerState({ extensionState })
+      const selectedTagIds = normalizeSelectionIds(
+        state.selectedTagIds || [
+          ...(state.primaryTagIds || [state.primaryTagId]),
+          ...(state.secondaryTagIds || [state.secondaryTagId]),
+        ]
+      )
       return {
         ...payload,
         data: {
