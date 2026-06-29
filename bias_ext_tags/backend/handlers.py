@@ -119,7 +119,32 @@ def _tag_query_value(context, key: str, default=None):
 
 def _tag_payload(context) -> dict:
     payload = context.get("payload")
-    return payload if isinstance(payload, dict) else {}
+    if not isinstance(payload, dict):
+        return {}
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return dict(payload)
+
+    attributes = data.get("attributes")
+    normalized = dict(attributes) if isinstance(attributes, dict) else {}
+    relationships = data.get("relationships")
+    if isinstance(relationships, dict) and "parent" in relationships:
+        normalized["parent_id"] = _tag_relationship_id(relationships.get("parent"))
+    return normalized
+
+
+def _tag_relationship_id(value):
+    if isinstance(value, dict) and "data" in value:
+        value = value.get("data")
+    if value in (None, ""):
+        return None
+    if isinstance(value, dict):
+        value = value.get("id")
+    try:
+        normalized = int(value)
+    except (TypeError, ValueError):
+        return None
+    return normalized if normalized > 0 else None
 
 
 def _tag_object_id(context) -> int:

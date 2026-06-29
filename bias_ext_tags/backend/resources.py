@@ -159,6 +159,8 @@ def tag_resource_relationship_definitions():
             description="标签父级关系。",
             select_related=("parent",),
             resource_type="tag",
+            writable=tag_parent_relationship_writable,
+            setter=set_tag_parent_relationship,
         ),
         ResourceRelationshipDefinition(
             resource="tag",
@@ -473,6 +475,36 @@ def resolve_tag_parent(tag, context: dict):
     if not TagService.can_view_tag(parent, context.get("user")):
         return None
     return parent
+
+
+def tag_parent_relationship_writable(tag, context: dict) -> bool:
+    attributes = _tag_resource_attributes(context)
+    return bool(attributes.get("is_primary"))
+
+
+def set_tag_parent_relationship(tag, value, context: dict) -> None:
+    tag.parent_id = _tag_relationship_resource_id(value)
+
+
+def _tag_resource_attributes(context: dict) -> dict:
+    payload = context.get("payload") if isinstance(context, dict) else None
+    data = payload.get("data") if isinstance(payload, dict) else None
+    attributes = data.get("attributes") if isinstance(data, dict) else None
+    return dict(attributes) if isinstance(attributes, dict) else {}
+
+
+def _tag_relationship_resource_id(value) -> int | None:
+    if isinstance(value, dict) and "data" in value:
+        value = value.get("data")
+    if value in (None, ""):
+        return None
+    if isinstance(value, dict):
+        value = value.get("id")
+    try:
+        normalized = int(value)
+    except (TypeError, ValueError):
+        return None
+    return normalized if normalized > 0 else None
 
 
 def resolve_tag_children(tag, context: dict) -> list[Tag]:

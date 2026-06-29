@@ -302,6 +302,18 @@ class TagsExtensionRuntimeTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(endpoints["update"].forum_permission, "tag.edit")
         self.assertEqual(endpoints["delete"].forum_permission, "tag.delete")
 
+    def test_tag_parent_relationship_declares_flarum_writable_condition(self):
+        application = self.bootstrap_extensions("tags")
+        relationships = {
+            relationship.relationship: relationship
+            for relationship in application.resources.get_relationships("tag")
+        }
+        parent = relationships["parent"]
+
+        self.assertTrue(callable(parent.writable))
+        self.assertTrue(parent.writable(None, {"payload": {"data": {"attributes": {"is_primary": True}}}}))
+        self.assertFalse(parent.writable(None, {"payload": {"data": {"attributes": {"is_primary": False}}}}))
+
     def test_staff_users_receive_tag_management_forum_permissions(self):
         from bias_core.forum_permissions import has_forum_permission
 
@@ -1907,6 +1919,52 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(response.status_code, 400, response.content)
         self.assertIn("主标签", response.json()["error"])
         self.assertFalse(Tag.objects.filter(slug="invalid-secondary-child").exists())
+
+    def test_tag_create_and_update_accept_parent_relationship_payload_like_flarum(self):
+        response = self.client.post(
+            "/api/tags",
+            data=json.dumps({
+                "data": {
+                    "type": "tag",
+                    "attributes": {
+                        "name": "关系子标签",
+                        "slug": "relationship-payload-child",
+                        "is_primary": True,
+                    },
+                    "relationships": {
+                        "parent": {
+                            "data": {"type": "tag", "id": str(self.public_tag.id)},
+                        },
+                    },
+                },
+            }),
+            content_type="application/json",
+            **self.auth_header(self.admin),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertEqual(payload["parent_id"], self.public_tag.id)
+        tag = Tag.objects.get(id=payload["id"])
+        self.assertEqual(tag.parent_id, self.public_tag.id)
+
+        response = self.client.patch(
+            f"/api/tags/{tag.id}",
+            data=json.dumps({
+                "data": {
+                    "type": "tag",
+                    "attributes": {"is_primary": True},
+                    "relationships": {"parent": {"data": None}},
+                },
+            }),
+            content_type="application/json",
+            **self.auth_header(self.admin),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertIsNone(response.json()["parent_id"])
+        tag.refresh_from_db()
+        self.assertIsNone(tag.parent_id)
 
     def test_tag_detail_exposes_registered_resource_fields(self):
         with self.captureOnCommitCallbacks(execute=True):
