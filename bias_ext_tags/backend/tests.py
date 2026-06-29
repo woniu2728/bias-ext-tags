@@ -2281,6 +2281,39 @@ class TagSearchApiTests(ExtensionRuntimeTestMixin, TestCase):
             {first_discussion.id, second_discussion.id},
         )
 
+    def test_search_api_tag_filter_supports_untagged_without_slug_lookup(self):
+        tagged = Tag.objects.create(name="搜索已标记", slug="search-tagged")
+        create_runtime_discussion(
+            title="搜索已标记讨论",
+            content="shared-untagged-keyword",
+            user=self.user,
+            extension_payload=discussion_tags_payload([tagged.id]),
+        )
+        untagged_discussion = create_runtime_discussion(
+            title="搜索未标记讨论",
+            content="shared-untagged-keyword",
+            user=self.user,
+        )
+
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get(
+                "/api/search",
+                {"q": "shared-untagged-keyword tag:untagged", "type": "discussions"},
+                **self.auth_header(),
+            )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertEqual(payload["discussion_total"], 1)
+        self.assertEqual([item["id"] for item in payload["discussions"]], [untagged_discussion.id])
+        slug_resolution_queries = [
+            query["sql"]
+            for query in queries
+            if 'from "tags"' in query["sql"].lower()
+            and '"slug" in' in query["sql"].lower()
+        ]
+        self.assertEqual(slug_resolution_queries, [])
+
     def test_search_api_multiple_tag_filters_resolve_slugs_with_one_lookup(self):
         primary_tag = Tag.objects.create(name="搜索交集主标签", slug="search-and-primary")
         secondary_tag = Tag.objects.create(
@@ -2437,6 +2470,49 @@ class TagSearchApiTests(ExtensionRuntimeTestMixin, TestCase):
         payload = response.json()
         self.assertEqual(payload["post_total"], 2)
         self.assertEqual({item["id"] for item in payload["posts"]}, {first_post.id, second_post.id})
+
+    def test_search_api_posts_tag_filter_supports_untagged_without_slug_lookup(self):
+        tagged = Tag.objects.create(name="帖子已标记", slug="post-tagged")
+        tagged_discussion = create_runtime_discussion(
+            title="帖子已标记讨论",
+            content="首帖内容",
+            user=self.user,
+            extension_payload=discussion_tags_payload([tagged.id]),
+        )
+        untagged_discussion = create_runtime_discussion(
+            title="帖子未标记讨论",
+            content="首帖内容",
+            user=self.user,
+        )
+        create_runtime_post(
+            discussion_id=tagged_discussion.id,
+            content="post-untagged-keyword",
+            user=self.user,
+        )
+        matched_post = create_runtime_post(
+            discussion_id=untagged_discussion.id,
+            content="post-untagged-keyword",
+            user=self.user,
+        )
+
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get(
+                "/api/search",
+                {"q": "post-untagged-keyword tag:untagged", "type": "posts"},
+                **self.auth_header(),
+            )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertEqual(payload["post_total"], 1)
+        self.assertEqual([item["id"] for item in payload["posts"]], [matched_post.id])
+        slug_resolution_queries = [
+            query["sql"]
+            for query in queries
+            if 'from "tags"' in query["sql"].lower()
+            and '"slug" in' in query["sql"].lower()
+        ]
+        self.assertEqual(slug_resolution_queries, [])
 
     def test_search_api_posts_multiple_tag_filters_resolve_slugs_with_one_lookup(self):
         primary_tag = Tag.objects.create(name="帖子交集主标签", slug="post-and-primary")
