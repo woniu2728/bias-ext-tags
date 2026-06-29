@@ -88,6 +88,27 @@ def replace_discussion_tags(discussion, tags: Iterable) -> dict:
     ))
     previous_tag_names = tuple(tag.name for tag in sorted(previous_tags, key=lambda item: item.name))
     normalized_tags = tuple(tags or ())
+    current_tag_ids = tuple(
+        tag.id
+        for tag in normalized_tags
+        if getattr(tag, "id", None) is not None
+    )
+    current_tag_names = tuple(tag.name for tag in sorted(normalized_tags, key=lambda item: item.name))
+    previous_tag_id_set = set(previous_tag_ids)
+    current_tag_id_set = set(current_tag_ids)
+
+    if previous_tag_id_set == current_tag_id_set:
+        return {
+            "previous_tag_ids": previous_tag_ids,
+            "previous_tag_names": previous_tag_names,
+            "current_tag_ids": current_tag_ids,
+            "current_tag_names": current_tag_names,
+            "affected_tag_ids": (),
+            "added_tag_ids": (),
+            "removed_tag_ids": (),
+            "added_tags": (),
+            "removed_tags": (),
+        }
 
     DiscussionTag.objects.filter(discussion=discussion).delete()
     DiscussionTag.objects.bulk_create([
@@ -96,10 +117,6 @@ def replace_discussion_tags(discussion, tags: Iterable) -> dict:
     ])
     _clear_discussion_tags_prefetch_cache(discussion)
 
-    current_tag_ids = tuple(tag.id for tag in normalized_tags)
-    current_tag_names = tuple(tag.name for tag in sorted(normalized_tags, key=lambda item: item.name))
-    previous_tag_id_set = set(previous_tag_ids)
-    current_tag_id_set = set(current_tag_ids)
     return {
         "previous_tag_ids": previous_tag_ids,
         "previous_tag_names": previous_tag_names,

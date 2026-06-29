@@ -3523,6 +3523,31 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
             f"Replacing discussion tags should load the previous tag relation once: {previous_tag_selects}",
         )
 
+    def test_replacing_discussion_tags_skips_write_when_tags_are_unchanged(self):
+        from bias_ext_tags.backend.tag_relationships import replace_discussion_tags
+
+        tag = Tag.objects.create(name="不变标签", slug="unchanged-retag", color="#2980b9")
+        discussion = create_runtime_discussion(
+            title="Unchanged retag",
+            content="Initial content",
+            user=self.author,
+            extension_payload=discussion_tags_payload([tag.id]),
+        )
+        original_link_id = DiscussionTag.objects.get(discussion=discussion, tag=tag).id
+
+        with patch("bias_ext_tags.backend.tag_relationships.DiscussionTag.objects.bulk_create") as bulk_create:
+            result = replace_discussion_tags(discussion, (tag,))
+
+        bulk_create.assert_not_called()
+        self.assertTrue(DiscussionTag.objects.filter(id=original_link_id).exists())
+        self.assertEqual(result["previous_tag_ids"], (tag.id,))
+        self.assertEqual(result["current_tag_ids"], (tag.id,))
+        self.assertEqual(result["affected_tag_ids"], ())
+        self.assertEqual(result["added_tag_ids"], ())
+        self.assertEqual(result["removed_tag_ids"], ())
+        self.assertEqual(result["added_tags"], ())
+        self.assertEqual(result["removed_tags"], ())
+
     def test_updating_discussion_tags_creates_discussion_tagged_event_post(self):
         member_group = Group.objects.create(name="DiscussionTagEditor", color="#4d698e")
         Permission.objects.create(group=member_group, permission="startDiscussion")
