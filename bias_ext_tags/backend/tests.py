@@ -2472,6 +2472,36 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
             f"Expected one batched slug lookup, got {len(slug_resolution_queries)}: {slug_resolution_queries}",
         )
 
+    def test_discussion_list_serializes_tags_from_prefetched_links(self):
+        tags = [
+            Tag.objects.create(name=f"列表序列标签 {index}", slug=f"list-serialize-tag-{index}")
+            for index in range(3)
+        ]
+        for index in range(8):
+            create_runtime_discussion(
+                title=f"列表序列讨论 {index}",
+                content="用于验证讨论列表标签序列化查询数。",
+                user=self.author,
+                extension_payload=discussion_tags_payload([tags[index % len(tags)].id]),
+            )
+
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get("/api/discussions/")
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertGreaterEqual(len(response.json()["data"]), 8)
+        per_discussion_tag_queries = [
+            query["sql"]
+            for query in queries
+            if re.search(r'\bfrom\s+["`]?discussion_tag["`]?', query["sql"].lower())
+            and re.search(r'["`]?discussion_id["`]?\s*=\s*\d+\b', query["sql"].lower())
+        ]
+        self.assertEqual(
+            per_discussion_tag_queries,
+            [],
+            "Discussion list tag serialization should reuse prefetched tag links instead of querying per discussion.",
+        )
+
     def test_discussion_list_tag_filter_uses_active_slug_driver(self):
         set_active_slug_driver(Tag, "id_with_slug")
         first_tag = Tag.objects.create(name="列表 ID 标签一", slug="list-id-filter-one")

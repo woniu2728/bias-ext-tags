@@ -6,6 +6,10 @@ from bias_ext_tags.backend.models import DiscussionTag
 
 
 def get_discussion_tag_links(discussion):
+    prefetched = getattr(discussion, "_prefetched_objects_cache", {})
+    if "discussion_tags" in prefetched:
+        return list(prefetched["discussion_tags"])
+
     links = getattr(discussion, "discussion_tags", None)
     if links is None:
         return []
