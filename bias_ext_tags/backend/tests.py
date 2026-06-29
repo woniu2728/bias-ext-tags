@@ -4474,6 +4474,79 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
             },
         )
 
+    def test_consecutive_discussion_tagged_event_posts_merge_like_flarum(self):
+        member_group = Group.objects.create(name="DiscussionTagMergeEditor", color="#4d698e")
+        Permission.objects.create(group=member_group, permission="startDiscussion")
+        Permission.objects.create(group=member_group, permission="discussion.reply")
+        self.author.user_groups.add(member_group)
+
+        first_tag = Tag.objects.create(name="初始标签", slug="merge-initial", color="#2980b9")
+        second_tag = Tag.objects.create(name="中间标签", slug="merge-middle", color="#e67e22")
+        third_tag = Tag.objects.create(name="最终标签", slug="merge-final", color="#0f766e")
+        discussion = create_runtime_discussion(
+            title="Merge retag events",
+            content="Original content",
+            user=self.author,
+            extension_payload=discussion_tags_payload([first_tag.id]),
+        )
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.patch(
+                f"/api/discussions/{discussion.id}",
+                data=json.dumps(discussion_tags_payload([second_tag.id])),
+                content_type="application/json",
+                **self.auth_header(),
+            )
+        self.assertEqual(response.status_code, 200, response.content)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.patch(
+                f"/api/discussions/{discussion.id}",
+                data=json.dumps(discussion_tags_payload([third_tag.id])),
+                content_type="application/json",
+                **self.auth_header(),
+            )
+        self.assertEqual(response.status_code, 200, response.content)
+
+        tagged_posts = list(Post.objects.filter(discussion=discussion, type="discussionTagged").order_by("number"))
+        self.assertEqual(len(tagged_posts), 1)
+        self.assertEqual(tagged_posts[0].content, f"added:{third_tag.name}\nremoved:{first_tag.name}")
+
+    def test_reverted_discussion_tagged_event_post_is_deleted_like_flarum(self):
+        member_group = Group.objects.create(name="DiscussionTagRevertEditor", color="#4d698e")
+        Permission.objects.create(group=member_group, permission="startDiscussion")
+        Permission.objects.create(group=member_group, permission="discussion.reply")
+        self.author.user_groups.add(member_group)
+
+        first_tag = Tag.objects.create(name="原标签", slug="revert-initial", color="#2980b9")
+        second_tag = Tag.objects.create(name="临时标签", slug="revert-temporary", color="#e67e22")
+        discussion = create_runtime_discussion(
+            title="Revert retag events",
+            content="Original content",
+            user=self.author,
+            extension_payload=discussion_tags_payload([first_tag.id]),
+        )
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.patch(
+                f"/api/discussions/{discussion.id}",
+                data=json.dumps(discussion_tags_payload([second_tag.id])),
+                content_type="application/json",
+                **self.auth_header(),
+            )
+        self.assertEqual(response.status_code, 200, response.content)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.patch(
+                f"/api/discussions/{discussion.id}",
+                data=json.dumps(discussion_tags_payload([first_tag.id])),
+                content_type="application/json",
+                **self.auth_header(),
+            )
+        self.assertEqual(response.status_code, 200, response.content)
+
+        self.assertFalse(Post.objects.filter(discussion=discussion, type="discussionTagged").exists())
+
     def test_author_can_retag_own_discussion_before_replies_by_default(self):
         member_group = Group.objects.create(name="DiscussionTagReplyWindow", color="#4d698e")
         Permission.objects.create(group=member_group, permission="startDiscussion")

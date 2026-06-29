@@ -118,6 +118,7 @@ def handle_discussion_tagged(event: DiscussionTaggedEvent) -> None:
         event,
         "discussion_tagged",
         extra={"post_type": "discussionTagged"},
+        merge_strategy="same_actor_reversible",
     )
 
 

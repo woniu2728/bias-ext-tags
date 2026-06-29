@@ -163,6 +163,8 @@ def _clear_discussion_tags_prefetch_cache(discussion) -> None:
     prefetched = getattr(discussion, "_prefetched_objects_cache", None)
     if isinstance(prefetched, dict):
         prefetched.pop("discussion_tags", None)
+    if hasattr(discussion, "resource_discussion_tag_links_cache"):
+        delattr(discussion, "resource_discussion_tag_links_cache")
 
 
 def get_discussion_tag_ids_for_stats(discussion) -> list[int]:
