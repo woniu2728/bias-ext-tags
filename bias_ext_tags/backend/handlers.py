@@ -9,12 +9,17 @@ from ninja import Body
 from bias_core.extensions.platform import api_error
 from bias_core.extensions.platform import require_staff
 from bias_core.extensions.platform import resolve_authenticated_user
-from bias_core.extensions.runtime import get_runtime_resource_registry
 from bias_core.extensions.platform import ResourceQueryOptions, parse_resource_query_options
 from bias_core.extensions.platform import merge_resource_includes
 from bias_ext_tags.backend.models import Tag
 from bias_ext_tags.backend.schemas import TagCreateSchema, TagUpdateSchema
 from bias_ext_tags.backend.services import TagService
+
+
+def get_runtime_resource_registry(*args, **kwargs):
+    from bias_core.extensions.runtime import get_runtime_resource_registry as runtime_get_resource_registry
+
+    return runtime_get_resource_registry(*args, **kwargs)
 
 
 def _get_resource_registry():

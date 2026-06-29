@@ -1,15 +1,33 @@
 from bias_core.extensions import ExtensionEventListenerDefinition
-from bias_core.extensions.runtime import (
-    create_runtime_timeline_from_builder,
-    dispatch_runtime_tag_stats_refresh,
-    refresh_runtime_discussion_tag_stats,
-    refresh_runtime_tag_stats,
-)
 from bias_ext_tags.backend.events import (
     DiscussionTaggedEvent,
     DiscussionTagStatsRefreshEvent,
     TagStatsRefreshRequestedEvent,
 )
+
+
+def create_runtime_timeline_from_builder(*args, **kwargs):
+    from bias_core.extensions.runtime import create_runtime_timeline_from_builder as runtime_create_timeline_from_builder
+
+    return runtime_create_timeline_from_builder(*args, **kwargs)
+
+
+def refresh_runtime_discussion_tag_stats(*args, **kwargs):
+    from bias_core.extensions.runtime import refresh_runtime_discussion_tag_stats as runtime_refresh_discussion_tag_stats
+
+    return runtime_refresh_discussion_tag_stats(*args, **kwargs)
+
+
+def refresh_runtime_tag_stats(*args, **kwargs):
+    from bias_core.extensions.runtime import refresh_runtime_tag_stats as runtime_refresh_tag_stats
+
+    return runtime_refresh_tag_stats(*args, **kwargs)
+
+
+def dispatch_runtime_tag_stats_refresh(*args, **kwargs):
+    from bias_core.extensions.runtime import dispatch_runtime_tag_stats_refresh as runtime_dispatch_tag_stats_refresh
+
+    return runtime_dispatch_tag_stats_refresh(*args, **kwargs)
 
 
 def tag_event_listener_definitions():

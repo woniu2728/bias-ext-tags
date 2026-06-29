@@ -1,9 +1,6 @@
 from __future__ import annotations
 
 from bias_core.extensions.platform import dispatch_forum_event_after_commit
-from bias_core.extensions.runtime import (
-    ensure_can_start_discussion_in_runtime_tags,
-)
 from bias_ext_tags.backend.events import DiscussionTaggedEvent
 from bias_ext_tags.backend.services import TagService
 from bias_ext_tags.backend.tag_relationships import (
@@ -23,6 +20,8 @@ def set_discussion_tags_relationship(discussion, value, context: dict | None = N
     user = context.get("user")
     tag_ids = _relationship_tag_ids(value)
     if context.get("creating"):
+        from bias_core.extensions.runtime import ensure_can_start_discussion_in_runtime_tags
+
         tags = tuple(ensure_can_start_discussion_in_runtime_tags(user, tag_ids))
         previous_links = ()
     else:

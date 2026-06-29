@@ -7,15 +7,6 @@ from django.core.exceptions import PermissionDenied
 from django.utils import timezone
 from django.utils.text import slugify
 from bias_core.extensions.platform import get_extension_settings
-from bias_core.extensions.runtime import (
-    generate_runtime_model_slug,
-    get_runtime_forum_permissions,
-    get_runtime_permission_model,
-    has_runtime_forum_permission,
-    resolve_runtime_model_slug,
-    to_runtime_model_slug,
-)
-from bias_core.extensions.runtime import apply_runtime_counted_discussion_filter
 from bias_ext_tags.backend.models import DiscussionTag, Tag, TagState
 from bias_ext_tags.backend.tag_relationships import (
     get_discussion_tag_ids_for_stats,
@@ -24,6 +15,48 @@ from bias_ext_tags.backend.tag_relationships import (
 )
 
 _UNSET = object()
+
+
+def _has_runtime_forum_permission(user, ability: str) -> bool:
+    from bias_core.extensions.runtime import has_runtime_forum_permission
+
+    return has_runtime_forum_permission(user, ability)
+
+
+def _get_runtime_forum_permissions(user):
+    from bias_core.extensions.runtime import get_runtime_forum_permissions
+
+    return get_runtime_forum_permissions(user)
+
+
+def _get_runtime_permission_model():
+    from bias_core.extensions.runtime import get_runtime_permission_model
+
+    return get_runtime_permission_model()
+
+
+def _generate_runtime_model_slug(model, name, **kwargs):
+    from bias_core.extensions.runtime import generate_runtime_model_slug
+
+    return generate_runtime_model_slug(model, name, **kwargs)
+
+
+def _resolve_runtime_model_slug(model, slug, **kwargs):
+    from bias_core.extensions.runtime import resolve_runtime_model_slug
+
+    return resolve_runtime_model_slug(model, slug, **kwargs)
+
+
+def _to_runtime_model_slug(model, instance, **kwargs):
+    from bias_core.extensions.runtime import to_runtime_model_slug
+
+    return to_runtime_model_slug(model, instance, **kwargs)
+
+
+def _apply_runtime_counted_discussion_filter(queryset, **kwargs):
+    from bias_core.extensions.runtime import apply_runtime_counted_discussion_filter
+
+    return apply_runtime_counted_discussion_filter(queryset, **kwargs)
 
 
 class TagService:
@@ -154,7 +187,7 @@ class TagService:
 
     @staticmethod
     def can_manage_tags(user: Optional[Any], permission: str) -> bool:
-        return has_runtime_forum_permission(user, permission)
+        return _has_runtime_forum_permission(user, permission)
 
     @staticmethod
     def ensure_can_manage_tags(user: Optional[Any], permission: str, message: Optional[str] = None) -> None:
@@ -272,7 +305,7 @@ class TagService:
             return True
         if not user or not getattr(user, "is_authenticated", False):
             return False
-        return has_runtime_forum_permission(user, f"tag{tag.id}.{ability}")
+        return _has_runtime_forum_permission(user, f"tag{tag.id}.{ability}")
 
     @staticmethod
     def can_view_discussion_tags(discussion, user: Optional[Any]) -> bool:
@@ -312,11 +345,11 @@ class TagService:
             return False
         if getattr(user, "is_suspended", False):
             return False
-        if user.is_staff or has_runtime_forum_permission(user, "discussion.edit"):
+        if user.is_staff or _has_runtime_forum_permission(user, "discussion.edit"):
             return True
         if getattr(discussion, "user_id", None) != getattr(user, "id", None):
             return False
-        if not has_runtime_forum_permission(user, "discussion.reply"):
+        if not _has_runtime_forum_permission(user, "discussion.reply"):
             return False
 
         allow_tag_change = TagService.get_allow_tag_change_setting()
@@ -343,7 +376,7 @@ class TagService:
         tag_id = int(getattr(tag, "id", tag) or 0)
         if not tag_id:
             return 0
-        Permission = get_runtime_permission_model()
+        Permission = _get_runtime_permission_model()
         deleted, _ = Permission.objects.filter(permission__startswith=f"tag{tag_id}.").delete()
         return int(deleted or 0)
 
@@ -398,7 +431,7 @@ class TagService:
         min_secondary = TagService._settings_int(settings, "min_secondary_tags")
 
         if normalized == "startDiscussion":
-            if has_runtime_forum_permission(user, "startDiscussion") and has_runtime_forum_permission(user, "bypassTagCounts"):
+            if _has_runtime_forum_permission(user, "startDiscussion") and _has_runtime_forum_permission(user, "bypassTagCounts"):
                 return True
             if min_primary == 0 and min_secondary == 0:
                 return None
@@ -539,7 +572,7 @@ class TagService:
             return True
         if ability == "viewForum" and (not user or not getattr(user, "is_authenticated", False)):
             return True
-        return has_runtime_forum_permission(user, ability)
+        return _has_runtime_forum_permission(user, ability)
 
     @staticmethod
     def _forbidden_tag_ids_queryset(user: Optional[Any], action: str = "view"):
@@ -559,7 +592,7 @@ class TagService:
 
         suffix = f".{ability}"
         tag_ids: list[int] = []
-        for permission in get_runtime_forum_permissions(user):
+        for permission in _get_runtime_forum_permissions(user):
             if not permission.startswith("tag") or not permission.endswith(suffix):
                 continue
             raw_tag_id = permission[3:-len(suffix)]
@@ -614,7 +647,7 @@ class TagService:
 
     @staticmethod
     def validate_tag_count_limits(tags: List[Tag], user: Any = None) -> None:
-        if has_runtime_forum_permission(user, "bypassTagCounts"):
+        if _has_runtime_forum_permission(user, "bypassTagCounts"):
             return
 
         settings = get_extension_settings("tags")
@@ -638,7 +671,7 @@ class TagService:
     @staticmethod
     def normalize_tag_slug(name: str, slug: Optional[str] = None, *, exclude_tag_id: Optional[int] = None) -> str:
         TagService.validate_slug_value(slug)
-        runtime_slug = generate_runtime_model_slug(
+        runtime_slug = _generate_runtime_model_slug(
             Tag,
             name,
             explicit_slug=slug or "",
@@ -687,7 +720,7 @@ class TagService:
 
     @staticmethod
     def to_tag_slug(tag: Tag, *, driver: str | None = None) -> str:
-        runtime_slug = to_runtime_model_slug(Tag, tag, identifier=driver)
+        runtime_slug = _to_runtime_model_slug(Tag, tag, identifier=driver)
         if runtime_slug:
             return runtime_slug
         return str(getattr(tag, "slug", "") or "").strip()
@@ -908,7 +941,7 @@ class TagService:
         Returns:
             Optional[Tag]: 标签对象
         """
-        runtime_tag = resolve_runtime_model_slug(Tag, slug, identifier="default")
+        runtime_tag = _resolve_runtime_model_slug(Tag, slug, identifier="default")
         if runtime_tag is not None:
             return runtime_tag
 
@@ -919,7 +952,7 @@ class TagService:
 
     @staticmethod
     def get_tag_by_url_slug(slug: str, *, driver: str = "default") -> Optional[Tag]:
-        runtime_tag = resolve_runtime_model_slug(Tag, slug, identifier=driver)
+        runtime_tag = _resolve_runtime_model_slug(Tag, slug, identifier=driver)
         if runtime_tag is not None:
             return runtime_tag
         if driver == "default":
@@ -1457,7 +1490,7 @@ class TagService:
             return
 
         target_tag_ids = [tag.id for tag in tags]
-        counted_links = apply_runtime_counted_discussion_filter(
+        counted_links = _apply_runtime_counted_discussion_filter(
             DiscussionTag.objects.filter(tag_id__in=target_tag_ids),
             prefix="discussion",
         )

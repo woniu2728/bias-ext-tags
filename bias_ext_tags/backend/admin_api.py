@@ -6,22 +6,53 @@ from bias_core.extensions.platform import AccessTokenAuth
 from bias_core.extensions.platform import api_error
 from bias_core.extensions.platform import log_admin_action
 from bias_core.extensions.platform import require_staff
-from bias_core.extensions.runtime import (
-    create_runtime_tag,
-    delete_runtime_tag,
-    dispatch_runtime_tag_stats_refresh,
-    get_runtime_tag_scope_label,
-    move_runtime_tag,
-    order_runtime_tags,
-    update_runtime_tag,
-    validate_runtime_tag_parent_assignment,
-    validate_runtime_tag_scope_configuration,
-)
 from bias_ext_tags.backend.models import Tag
 from bias_ext_tags.backend.services import TagService
 
 
 router = Router()
+
+
+def create_runtime_tag(*args, **kwargs):
+    from bias_core.extensions.runtime import create_runtime_tag as runtime_create_tag
+
+    return runtime_create_tag(*args, **kwargs)
+
+
+def order_runtime_tags(*args, **kwargs):
+    from bias_core.extensions.runtime import order_runtime_tags as runtime_order_tags
+
+    return runtime_order_tags(*args, **kwargs)
+
+
+def update_runtime_tag(*args, **kwargs):
+    from bias_core.extensions.runtime import update_runtime_tag as runtime_update_tag
+
+    return runtime_update_tag(*args, **kwargs)
+
+
+def move_runtime_tag(*args, **kwargs):
+    from bias_core.extensions.runtime import move_runtime_tag as runtime_move_tag
+
+    return runtime_move_tag(*args, **kwargs)
+
+
+def delete_runtime_tag(*args, **kwargs):
+    from bias_core.extensions.runtime import delete_runtime_tag as runtime_delete_tag
+
+    return runtime_delete_tag(*args, **kwargs)
+
+
+def dispatch_runtime_tag_stats_refresh(*args, **kwargs):
+    from bias_core.extensions.runtime import dispatch_runtime_tag_stats_refresh as runtime_dispatch_tag_stats_refresh
+
+    return runtime_dispatch_tag_stats_refresh(*args, **kwargs)
+
+
+def _runtime_tag_scope_label(scope):
+    from bias_core.extensions.runtime import get_runtime_tag_scope_label
+
+    return get_runtime_tag_scope_label(scope)
 
 
 def serialize_admin_tag(tag: Tag):
@@ -43,9 +74,9 @@ def serialize_admin_tag(tag: Tag):
         "view_scope": tag.view_scope,
         "start_discussion_scope": tag.start_discussion_scope,
         "reply_scope": tag.reply_scope,
-        "view_scope_label": get_runtime_tag_scope_label(tag.view_scope),
-        "start_discussion_scope_label": get_runtime_tag_scope_label(tag.start_discussion_scope),
-        "reply_scope_label": get_runtime_tag_scope_label(tag.reply_scope),
+        "view_scope_label": _runtime_tag_scope_label(tag.view_scope),
+        "start_discussion_scope_label": _runtime_tag_scope_label(tag.start_discussion_scope),
+        "reply_scope_label": _runtime_tag_scope_label(tag.reply_scope),
     }
 
 

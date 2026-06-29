@@ -12,17 +12,6 @@ from ninja_jwt.tokens import RefreshToken
 from io import StringIO
 from unittest.mock import Mock, patch
 
-from bias_core.extensions.runtime import (
-    approve_runtime_discussion,
-    create_runtime_discussion,
-    delete_runtime_discussion,
-    get_runtime_model_url_service,
-    get_runtime_tag_state_model,
-    reject_runtime_discussion,
-    set_runtime_discussion_hidden_state,
-    to_runtime_model_slug,
-    update_runtime_discussion,
-)
 from bias_core.extensions import ResourceEndpointDefinition, SearchFilterDefinition
 from bias_core.resource_objects import ResourceSearchCriteria
 from bias_core.extensions.testing import (
@@ -46,24 +35,92 @@ from bias_core.extensions.testing import (
 )
 from bias_ext_tags.backend.events import DiscussionTaggedEvent, TagStatsRefreshRequestedEvent
 from bias_ext_tags.backend.models import Tag
-from bias_core.extensions.runtime import get_runtime_discussion_tag_model
 from bias_ext_tags.backend.services import TagService
 from bias_ext_tags.backend.resources import tag_resource_endpoints
-from bias_core.extensions.runtime import (
-    approve_runtime_post,
-    create_runtime_post,
-    delete_runtime_post,
-    get_runtime_post_model,
-    reject_runtime_post,
-    set_runtime_post_hidden_state,
-)
-from bias_core.extensions.runtime import (
-    get_runtime_group_model,
-    get_runtime_permission_model,
-    get_runtime_user_model,
-)
 from bias_core.models import Setting
 from bias_core.settings_service import clear_runtime_setting_caches
+
+
+def _runtime_facade(name: str):
+    from importlib import import_module
+
+    return getattr(import_module("bias_core.extensions.runtime"), name)
+
+
+def approve_runtime_discussion(*args, **kwargs):
+    return _runtime_facade("approve_runtime_discussion")(*args, **kwargs)
+
+
+def create_runtime_discussion(*args, **kwargs):
+    return _runtime_facade("create_runtime_discussion")(*args, **kwargs)
+
+
+def delete_runtime_discussion(*args, **kwargs):
+    return _runtime_facade("delete_runtime_discussion")(*args, **kwargs)
+
+
+def get_runtime_model_url_service(*args, **kwargs):
+    return _runtime_facade("get_runtime_model_url_service")(*args, **kwargs)
+
+
+def get_runtime_tag_state_model(*args, **kwargs):
+    return _runtime_facade("get_runtime_tag_state_model")(*args, **kwargs)
+
+
+def reject_runtime_discussion(*args, **kwargs):
+    return _runtime_facade("reject_runtime_discussion")(*args, **kwargs)
+
+
+def set_runtime_discussion_hidden_state(*args, **kwargs):
+    return _runtime_facade("set_runtime_discussion_hidden_state")(*args, **kwargs)
+
+
+def to_runtime_model_slug(*args, **kwargs):
+    return _runtime_facade("to_runtime_model_slug")(*args, **kwargs)
+
+
+def update_runtime_discussion(*args, **kwargs):
+    return _runtime_facade("update_runtime_discussion")(*args, **kwargs)
+
+
+def get_runtime_discussion_tag_model(*args, **kwargs):
+    return _runtime_facade("get_runtime_discussion_tag_model")(*args, **kwargs)
+
+
+def approve_runtime_post(*args, **kwargs):
+    return _runtime_facade("approve_runtime_post")(*args, **kwargs)
+
+
+def create_runtime_post(*args, **kwargs):
+    return _runtime_facade("create_runtime_post")(*args, **kwargs)
+
+
+def delete_runtime_post(*args, **kwargs):
+    return _runtime_facade("delete_runtime_post")(*args, **kwargs)
+
+
+def get_runtime_post_model(*args, **kwargs):
+    return _runtime_facade("get_runtime_post_model")(*args, **kwargs)
+
+
+def reject_runtime_post(*args, **kwargs):
+    return _runtime_facade("reject_runtime_post")(*args, **kwargs)
+
+
+def set_runtime_post_hidden_state(*args, **kwargs):
+    return _runtime_facade("set_runtime_post_hidden_state")(*args, **kwargs)
+
+
+def get_runtime_group_model(*args, **kwargs):
+    return _runtime_facade("get_runtime_group_model")(*args, **kwargs)
+
+
+def get_runtime_permission_model(*args, **kwargs):
+    return _runtime_facade("get_runtime_permission_model")(*args, **kwargs)
+
+
+def get_runtime_user_model(*args, **kwargs):
+    return _runtime_facade("get_runtime_user_model")(*args, **kwargs)
 
 
 class RuntimeModelProxy:

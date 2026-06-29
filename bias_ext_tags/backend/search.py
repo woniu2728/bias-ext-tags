@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from django.db.models import Exists, OuterRef, Q, Subquery
 
-from bias_core.extensions.runtime import resolve_runtime_model_slugs
 from bias_ext_tags.backend.models import DiscussionTag, Tag
 
 
@@ -172,6 +171,8 @@ def _resolve_tag_slug_ids(groups: tuple[tuple[str, ...], ...], context: dict) ->
             for slug in slugs
             if cache.get(slug) is not None
         }
+
+    from bias_core.extensions.runtime import resolve_runtime_model_slugs
 
     resolved = resolve_runtime_model_slugs(
         Tag,
