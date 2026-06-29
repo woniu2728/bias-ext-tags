@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from bias_core.extensions.platform import ResourceQueryOptions, jsonapi_response, parse_resource_query_options, wants_jsonapi_response
+from bias_core.extensions.platform import ResourceQueryOptions, parse_resource_query_options, serialize_resource_jsonapi_response, wants_jsonapi_response
 from bias_core.extensions.platform import merge_resource_includes
 from bias_ext_tags.backend.models import Tag
 from bias_ext_tags.backend.services import TagService
@@ -110,32 +110,27 @@ def _jsonapi_serialize_context(context, *, action="view") -> dict:
 
 
 def _jsonapi_tag_response(tag, context, *, action="view", status=200):
-    if not _wants_jsonapi_response(context):
-        return None
     resource_options = _tag_resource_options(context)
-    document = _get_resource_registry().serialize_jsonapi_document(
+    return serialize_resource_jsonapi_response(
+        _get_resource_registry(),
         "tag",
         tag,
         _jsonapi_serialize_context(context, action=action),
-        only=resource_options.fields,
-        include=resource_options.includes,
+        resource_options=resource_options,
+        status=status,
     )
-    return jsonapi_response(document, status=status)
 
 
 def _jsonapi_tags_response(tags, context, *, action="view"):
-    if not _wants_jsonapi_response(context):
-        return None
     resource_options = _tag_resource_options(context)
-    document = _get_resource_registry().serialize_jsonapi_document(
+    return serialize_resource_jsonapi_response(
+        _get_resource_registry(),
         "tag",
         tags,
         _jsonapi_serialize_context(context, action=action),
-        only=resource_options.fields,
-        include=resource_options.includes,
+        resource_options=resource_options,
         many=True,
     )
-    return jsonapi_response(document)
 
 
 def _apply_tag_resource_preloads(queryset, user=None, action="view", resource_options=None):

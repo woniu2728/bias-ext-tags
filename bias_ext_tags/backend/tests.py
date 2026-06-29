@@ -3149,13 +3149,22 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertIn("没有权限", payload["errors"][0]["detail"])
 
     def test_tag_read_endpoints_do_not_refresh_stats(self):
-        with patch("bias_ext_tags.backend.handlers.TagService.refresh_tag_stats") as refresh_stats:
+        with patch("bias_ext_tags.backend.resource_endpoints.TagService.refresh_tag_stats") as refresh_stats:
             list_response = self.client.get("/api/tags")
             popular_response = self.client.get("/api/tags/popular")
 
         self.assertEqual(list_response.status_code, 200, list_response.content)
         self.assertEqual(popular_response.status_code, 200, popular_response.content)
         refresh_stats.assert_not_called()
+
+    def test_tag_popular_can_return_flarum_jsonapi_document_when_requested(self):
+        response = self.client.get("/api/tags/popular", **self.jsonapi_header())
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response["Content-Type"], "application/vnd.api+json")
+        payload = response.json()
+        self.assertEqual(payload["data"][0]["type"], "tags")
+        self.assertIn("self", payload["data"][0]["links"])
 
     def test_tag_list_reuses_forbidden_tag_context_for_children(self):
         Tag.objects.create(
