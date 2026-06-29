@@ -140,7 +140,7 @@ class TagResource(DatabaseResource):
             .set_with(_set_tag_is_primary),
             ResourceField("isRestricted", resolver=lambda tag, context: tag.is_restricted, module_id=EXTENSION_ID)
             .boolean()
-            .writable_when()
+            .writable_on_update_field()
             .visible_when(_can_view_tag_admin_fields)
             .set_with(_set_tag_is_restricted),
             ResourceField("discussionCount", resolver=lambda tag, context: tag.discussion_count, module_id=EXTENSION_ID)
