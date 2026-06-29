@@ -15,6 +15,7 @@ from unittest.mock import Mock, patch
 from bias_core.extensions import ResourceEndpointDefinition, SearchFilterDefinition
 from bias_core.resource_errors import JsonApiForbidden, JsonApiValidationError
 from bias_core.resource_objects import ResourceSearchCriteria
+from bias_core.resource_search import ResourceSearchState
 from bias_core.extensions.testing import (
     AuditLog,
     ExtensionInstallation,
@@ -4765,6 +4766,31 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(response.json()["total"], 0)
         self.assertEqual(response.json()["data"], [])
+
+    def test_tag_filter_resolves_actor_from_search_state(self):
+        from bias_ext_tags.backend.search import _resolve_tag_slug_ids
+
+        staff_tag = Tag.objects.create(
+            name="状态对象管理标签",
+            slug="state-actor-filter-tag",
+            view_scope=Tag.ACCESS_STAFF,
+            start_discussion_scope=Tag.ACCESS_STAFF,
+            reply_scope=Tag.ACCESS_STAFF,
+        )
+        admin = User.objects.create_superuser(
+            username="state-actor-filter-admin",
+            email="state-actor-filter-admin@example.com",
+            password="password123",
+        )
+        state = ResourceSearchState(
+            queryset=None,
+            criteria=ResourceSearchCriteria(user=admin, filters={"tag": staff_tag.slug}, resource="discussion"),
+            context={},
+        )
+
+        resolved = _resolve_tag_slug_ids(((staff_tag.slug,),), {"search_state": state})
+
+        self.assertEqual(resolved, {staff_tag.slug: staff_tag.id})
 
     def test_discussion_list_active_slug_driver_resolves_multiple_slugs_with_one_lookup(self):
         from bias_ext_tags.backend.search import apply_discussion_tag_list_query

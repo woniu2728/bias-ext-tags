@@ -178,7 +178,7 @@ def _resolve_tag_slug_ids(groups: tuple[tuple[str, ...], ...], context: dict) ->
         Tag,
         missing_slugs,
         identifier=None,
-        context={"user": (context or {}).get("user")},
+        context={"user": _search_actor(context)},
     )
     resolved_ids = {
         slug: int(tag.id)
@@ -194,6 +194,18 @@ def _resolve_tag_slug_ids(groups: tuple[tuple[str, ...], ...], context: dict) ->
             if cache.get(slug) is not None
         }
     return resolved_ids
+
+
+def _search_actor(context: dict):
+    if not isinstance(context, dict):
+        return None
+    state = context.get("search_state")
+    get_actor = getattr(state, "get_actor", None)
+    if callable(get_actor):
+        actor = get_actor()
+        if actor is not None:
+            return actor
+    return context.get("actor") or context.get("user")
 
 
 def _query_param_value(params, key: str):
