@@ -1888,6 +1888,31 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
             "Tag children include should use the prefetched child collection instead of querying per parent tag.",
         )
 
+    def test_tag_list_skips_child_prefetch_when_children_are_not_requested(self):
+        Tag.objects.create(
+            name="无需预加载子标签",
+            slug="no-prefetch-child",
+            parent=self.public_tag,
+        )
+
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get("/api/tags", {"include_children": False})
+
+        self.assertEqual(response.status_code, 200, response.content)
+        public_tag = next(tag for tag in response.json()["data"] if tag["slug"] == self.public_tag.slug)
+        self.assertEqual(public_tag["children"], [])
+        child_prefetch_queries = [
+            query["sql"]
+            for query in queries
+            if 'from "tags"' in query["sql"].lower()
+            and re.search(r'where .*"tags"\."parent_id" in', query["sql"].lower())
+        ]
+        self.assertEqual(
+            child_prefetch_queries,
+            [],
+            "Tag list should not prefetch children when no child payload or include is requested.",
+        )
+
     def test_tag_slug_detail_accepts_id_with_slug_url(self):
         response = self.client.get(f"/api/tags/slug/{self.public_tag.id}-renamed")
 
@@ -1972,6 +1997,34 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         public_tag = next(tag for tag in response.json()["data"] if tag["slug"] == "public-tag")
         self.assertEqual([tag["slug"] for tag in public_tag["children"]], ["public-child"])
         self.assertEqual(get_forbidden_tag_ids.call_count, 1)
+
+    def test_tag_children_payload_is_limited_to_direct_children(self):
+        child = Tag.objects.create(
+            name="直接子标签",
+            slug="direct-child",
+            parent=self.public_tag,
+        )
+        Tag.objects.create(
+            name="历史孙级标签",
+            slug="legacy-grandchild",
+            parent=child,
+        )
+
+        list_response = self.client.get("/api/tags", {"include_children": True})
+        detail_response = self.client.get(f"/api/tags/{self.public_tag.id}")
+        include_response = self.client.get("/api/tags", {"include": "children"})
+
+        self.assertEqual(list_response.status_code, 200, list_response.content)
+        self.assertEqual(detail_response.status_code, 200, detail_response.content)
+        self.assertEqual(include_response.status_code, 200, include_response.content)
+        list_public_tag = next(tag for tag in list_response.json()["data"] if tag["slug"] == "public-tag")
+        include_public_tag = next(tag for tag in include_response.json()["data"] if tag["slug"] == "public-tag")
+        list_child = next(tag for tag in list_public_tag["children"] if tag["slug"] == "direct-child")
+        detail_child = next(tag for tag in detail_response.json()["children"] if tag["slug"] == "direct-child")
+        include_child_slugs = [tag["slug"] for tag in include_public_tag["children"]]
+        self.assertEqual(list_child["children"], [])
+        self.assertEqual(detail_child["children"], [])
+        self.assertEqual(include_child_slugs, ["direct-child"])
 
 
 class TagForumSettingsTests(TestCase):

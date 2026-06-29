@@ -66,7 +66,7 @@ def _serialize_tag(
             _serialize_tag(
                 child,
                 user=user,
-                include_children=True,
+                include_children=False,
                 action=action,
                 context=context,
                 resource_options=resource_options,
@@ -171,21 +171,23 @@ def dispatch_tag_index(context):
     resource_options = _tag_resource_options(context)
     include_hidden = _tag_bool_query_value(context, "include_hidden", False)
     include_children = _tag_bool_query_value(context, "include_children", True)
+    children_requested = include_children or "children" in resource_options.includes
     purpose = _tag_purpose_query_value(context)
     discussion_tag_ids = _tag_current_discussion_tag_ids(context) if purpose == "add_to_discussion" else ()
     if include_hidden and (not user or not user.is_staff):
         include_hidden = False
 
-    visible_child_queryset = Tag.objects.select_related("last_posted_discussion").order_by(*TagService.child_order_by())
-    if not include_hidden:
-        visible_child_queryset = visible_child_queryset.filter(is_hidden=False)
-    visible_child_queryset = TagService.filter_tags_for_user(visible_child_queryset, user, action=purpose)
-    if discussion_tag_ids:
-        visible_child_queryset = visible_child_queryset | Tag.objects.filter(id__in=discussion_tag_ids)
-
-    queryset = Tag.objects.select_related("last_posted_discussion").prefetch_related(
-        Prefetch("children", queryset=visible_child_queryset, to_attr="visible_children")
-    ).all()
+    queryset = Tag.objects.select_related("last_posted_discussion").all()
+    if children_requested:
+        visible_child_queryset = Tag.objects.select_related("last_posted_discussion").order_by(*TagService.child_order_by())
+        if not include_hidden:
+            visible_child_queryset = visible_child_queryset.filter(is_hidden=False)
+        visible_child_queryset = TagService.filter_tags_for_user(visible_child_queryset, user, action=purpose)
+        if discussion_tag_ids:
+            visible_child_queryset = visible_child_queryset | Tag.objects.filter(id__in=discussion_tag_ids)
+        queryset = queryset.prefetch_related(
+            Prefetch("children", queryset=visible_child_queryset, to_attr="visible_children")
+        )
     queryset = _apply_tag_resource_preloads(
         queryset,
         user=user,

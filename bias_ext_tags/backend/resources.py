@@ -453,15 +453,16 @@ def _normalized_lines(content: str | None) -> list[str]:
     ]
 
 
-def _serialize_forum_tag(tag, context: dict) -> dict:
+def _serialize_forum_tag(tag, context: dict, include_children: bool = True) -> dict:
     payload = serialize_tag_base(tag, context)
     payload["can_start_discussion"] = resolve_tag_can_start_discussion(tag, context)
     payload["can_add_to_discussion"] = resolve_tag_can_add_to_discussion(tag, context)
     payload["can_reply"] = resolve_tag_can_reply(tag, context)
     payload["last_posted_discussion"] = resolve_tag_last_posted_discussion(tag, context)
+    children = getattr(tag, "visible_children", []) if include_children else []
     payload["children"] = [
-        _serialize_forum_tag(child, context)
-        for child in getattr(tag, "visible_children", [])
+        _serialize_forum_tag(child, context, include_children=False)
+        for child in children
     ]
     return payload
 
