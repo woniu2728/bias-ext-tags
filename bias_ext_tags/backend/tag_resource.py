@@ -361,7 +361,6 @@ class TagResource(DatabaseResource):
         from bias_ext_tags.backend.services import TagService
 
         instance = self.creating(instance, context) or instance
-        instance = self.saving(instance, context) or instance
         payload = _service_payload_from_instance(instance, context, creating=True)
         return TagService.create_tag(user=context.get("user"), **payload)
 
