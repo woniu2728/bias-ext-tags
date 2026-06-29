@@ -1,6 +1,6 @@
 from typing import Optional
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class TagCreateSchema(BaseModel):
@@ -20,11 +20,12 @@ class TagCreateSchema(BaseModel):
     start_discussion_scope: Optional[str] = Field("members", description="发帖权限级别")
     reply_scope: Optional[str] = Field("members", description="回帖权限级别")
 
-    @validator('name')
-    def validate_name(cls, v):
-        if not v.strip():
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value):
+        if not value.strip():
             raise ValueError('标签名称不能为空')
-        return v.strip()
+        return value.strip()
 
 
 class TagUpdateSchema(BaseModel):
