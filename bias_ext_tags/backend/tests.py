@@ -5058,6 +5058,47 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(tag.discussion_count, 1)
         self.assertEqual(tag.last_posted_discussion_id, older_discussion.id)
 
+    def test_create_discussion_requires_tags_relationship_without_bypass_permission(self):
+        group = Group.objects.create(name="StartWithoutBypass", color="#4d698e")
+        Permission.objects.create(group=group, permission="startDiscussion")
+        self.author.user_groups.add(group)
+        if hasattr(self.author, "_forum_permission_cache"):
+            delattr(self.author, "_forum_permission_cache")
+
+        response = self.client.post(
+            "/api/discussions/",
+            data=json.dumps(discussion_resource_payload(
+                title="Missing tags relationship",
+                content="Creating without tags should be rejected by the resource schema.",
+            )),
+            content_type="application/json",
+            **self.auth_header(),
+        )
+
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn("缺少必填关系: tags", response.json()["error"])
+
+    def test_create_discussion_allows_missing_tags_relationship_with_bypass_permission(self):
+        group = Group.objects.create(name="StartWithBypass", color="#4d698e")
+        Permission.objects.create(group=group, permission="startDiscussion")
+        Permission.objects.create(group=group, permission="bypassTagCounts")
+        self.author.user_groups.add(group)
+        if hasattr(self.author, "_forum_permission_cache"):
+            delattr(self.author, "_forum_permission_cache")
+
+        response = self.client.post(
+            "/api/discussions/",
+            data=json.dumps(discussion_resource_payload(
+                title="Missing tags with bypass",
+                content="Bypass permission matches Flarum's optional tags relationship.",
+            )),
+            content_type="application/json",
+            **self.auth_header(),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["tags"], [])
+
     def test_cannot_create_discussion_with_secondary_tag_only(self):
         parent_tag = Tag.objects.create(name="开发", slug="dev")
         child_tag = Tag.objects.create(name="后端", slug="backend", parent=parent_tag)

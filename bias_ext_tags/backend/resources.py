@@ -67,6 +67,7 @@ def discussion_resource_relationship_definitions():
             many=True,
             writable=True,
             value_type="array",
+            required_on_create=discussion_tags_required_on_create,
             setter=set_discussion_tags_relationship,
         ),
     )
@@ -343,6 +344,16 @@ def resolve_discussion_can_tag(discussion, context: dict) -> bool:
     from bias_ext_tags.backend.services import TagService
 
     return TagService.can_tag_discussion(discussion, context.get("user"))
+
+
+def discussion_tags_required_on_create(discussion, context: dict) -> bool:
+    user = context.get("user")
+    if not user or not getattr(user, "is_authenticated", False):
+        return True
+
+    from bias_core.extensions.runtime import has_runtime_forum_permission
+
+    return not has_runtime_forum_permission(user, "bypassTagCounts")
 
 
 def resolve_forum_tags(forum, context: dict) -> list[dict]:
