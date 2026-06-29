@@ -6,23 +6,36 @@ from bias_ext_tags.backend.models import DiscussionTag
 
 
 def get_discussion_tag_links(discussion):
+    cached = getattr(discussion, "resource_discussion_tag_links_cache", None)
+    if cached is not None:
+        return list(cached)
+
     prefetched = getattr(discussion, "_prefetched_objects_cache", {})
     if "discussion_tags" in prefetched:
-        return list(prefetched["discussion_tags"])
+        links = list(prefetched["discussion_tags"])
+        setattr(discussion, "resource_discussion_tag_links_cache", links)
+        return links
 
     links = getattr(discussion, "discussion_tags", None)
     if links is not None:
         queryset = links.select_related("tag") if hasattr(links, "select_related") else links
-        return list(queryset.all() if hasattr(queryset, "all") else queryset)
+        loaded = list(queryset.all() if hasattr(queryset, "all") else queryset)
+        setattr(discussion, "resource_discussion_tag_links_cache", loaded)
+        return loaded
 
     discussion_id = getattr(discussion, "id", discussion)
     if not discussion_id:
         return []
-    return list(
+    loaded = list(
         DiscussionTag.objects.filter(discussion_id=discussion_id)
         .select_related("tag")
         .order_by("tag_id")
     )
+    try:
+        setattr(discussion, "resource_discussion_tag_links_cache", loaded)
+    except Exception:
+        pass
+    return loaded
 
 
 def get_discussion_tags(discussion) -> list:

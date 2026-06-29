@@ -39,6 +39,13 @@ class PostPolicy(AuthorizationPolicy):
         discussion = getattr(model, "discussion", None)
         if discussion is None:
             return None
+        cache = context.get("discussion_tag_visibility_cache")
+        discussion_id = getattr(discussion, "id", None)
+        if isinstance(cache, dict) and discussion_id is not None:
+            key = (getattr(user, "id", None), int(discussion_id), "view")
+            if key not in cache:
+                cache[key] = TagService.can_view_discussion_tags(discussion, user)
+            return cache[key]
         return TagService.can_view_discussion_tags(discussion, user)
 
 
