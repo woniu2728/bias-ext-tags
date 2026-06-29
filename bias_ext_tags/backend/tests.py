@@ -13,7 +13,7 @@ from io import StringIO
 from unittest.mock import Mock, patch
 
 from bias_core.extensions import ResourceEndpointDefinition, SearchFilterDefinition
-from bias_core.resource_errors import JsonApiForbidden, JsonApiValidationError
+from bias_core.resource_errors import JsonApiValidationError
 from bias_core.resource_objects import ResourceSearchCriteria
 from bias_core.extensions.testing import (
     AuditLog,
@@ -2749,9 +2749,15 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
 
         self.assertIn(("index", "/tags", True), routes)
         self.assertIn(("show", "/tags/{object_id}", False), routes)
-        self.assertIn(("create", "/tags", True), routes)
-        self.assertIn(("update", "/tags/{object_id}", True), routes)
+        self.assertIn(("create", "/tags", False), routes)
+        self.assertIn(("update", "/tags/{object_id}", False), routes)
         self.assertIn(("delete", "/tags/{object_id}", False), routes)
+        endpoints = {
+            endpoint.endpoint: endpoint
+            for endpoint in registry.get_dispatch_endpoints("tag")
+        }
+        self.assertEqual(endpoints["create"].kind, "create")
+        self.assertEqual(endpoints["update"].kind, "update")
 
     def test_tag_resource_object_owns_flarum_writable_field_contract(self):
         registry = ResourceRegistry()
@@ -2778,11 +2784,14 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertTrue(fields["color"].nullable)
         self.assertTrue(fields["isHidden"].writable)
         self.assertTrue(fields["isPrimary"].writable)
-        self.assertFalse(fields["isRestricted"].writable(None, {"creating": True}))
-        self.assertTrue(fields["isRestricted"].writable(self.public_tag, {"creating": False}))
+        self.assertTrue(fields["isRestricted"].writable)
         self.assertTrue(fields["defaultSort"].writable)
+        self.assertTrue(fields["parent_id"].writable)
+        self.assertTrue(fields["parentId"].writable)
+        self.assertEqual(TagResource().jsonapi_types(), ("tag", "tags"))
         self.assertEqual(relationships["parent"].resource_type, "tag")
         self.assertFalse(relationships["parent"].many)
+        self.assertTrue(relationships["parent"].nullable)
         self.assertTrue(relationships["parent"].writable(None, {"payload": {"data": {"attributes": {"isPrimary": True}}}}))
         self.assertFalse(relationships["parent"].writable(None, {"payload": {"data": {"attributes": {"isPrimary": False}}}}))
         self.assertEqual(relationships["children"].resource_type, "tag")
@@ -2909,26 +2918,27 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
                 creating=True,
             )
 
-        with self.assertRaises(JsonApiForbidden):
-            registry.apply_resource_payload(
-                "tag",
-                Tag(),
-                {"name": "Restricted", "slug": "restricted", "isRestricted": True},
-                {
-                    "user": self.admin,
-                    "payload": {
-                        "data": {
-                            "type": "tag",
-                            "attributes": {
-                                "name": "Restricted",
-                                "slug": "restricted",
-                                "isRestricted": True,
-                            },
+        tag = Tag()
+        registry.apply_resource_payload(
+            "tag",
+            tag,
+            {"name": "Restricted", "slug": "restricted", "isRestricted": True},
+            {
+                "user": self.admin,
+                "payload": {
+                    "data": {
+                        "type": "tag",
+                        "attributes": {
+                            "name": "Restricted",
+                            "slug": "restricted",
+                            "isRestricted": True,
                         },
                     },
                 },
-                creating=True,
-            )
+            },
+            creating=True,
+        )
+        self.assertTrue(tag.is_restricted)
 
     def test_tag_resource_object_serializes_related_tag_models_through_core_jsonapi_serializer(self):
         child = Tag.objects.create(

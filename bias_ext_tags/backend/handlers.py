@@ -483,6 +483,25 @@ def core_show_tag_response(context, response):
     return _serialize_tag(tag, user=user, include_children=True, resource_options=resource_options)
 
 
+def core_write_tag_response(context, response):
+    tag = context.get("result")
+    if _wants_jsonapi_response(context):
+        if isinstance(response, tuple):
+            status, payload = response
+            return JsonResponse(
+                _flarum_jsonapi_document(payload),
+                status=status,
+                content_type="application/vnd.api+json",
+            )
+        if isinstance(response, dict):
+            return JsonResponse(
+                _flarum_jsonapi_document(response),
+                content_type="application/vnd.api+json",
+            )
+        return response
+    return _serialize_tag(tag, user=context.get("user"), include_children=True)
+
+
 def core_delete_tag_response(context, response):
     if _wants_jsonapi_response(context):
         return response

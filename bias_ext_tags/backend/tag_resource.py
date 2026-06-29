@@ -7,23 +7,23 @@ from bias_ext_tags.backend.models import Tag
 
 def tag_endpoint_specs() -> tuple[dict, ...]:
     from bias_ext_tags.backend.handlers import (
-        dispatch_tag_create,
         dispatch_tag_index,
         dispatch_tag_popular,
         dispatch_tag_show_by_slug,
-        dispatch_tag_update,
     )
-    from bias_ext_tags.backend.handlers import core_delete_tag_response, core_show_tag_response
+    from bias_ext_tags.backend.handlers import core_delete_tag_response, core_show_tag_response, core_write_tag_response
 
     return (
         {
             "name": "create",
-            "handler": dispatch_tag_create,
             "methods": ("POST",),
             "path": "/tags",
             "absolute_path": True,
             "auth_required": True,
+            "ability": "create",
+            "kind": "create",
             "forum_permission": "tag.create",
+            "response_callback": core_write_tag_response,
         },
         {
             "name": "index",
@@ -58,12 +58,14 @@ def tag_endpoint_specs() -> tuple[dict, ...]:
         },
         {
             "name": "update",
-            "handler": dispatch_tag_update,
             "methods": ("PATCH",),
             "path": "/tags/{object_id}",
             "absolute_path": True,
             "auth_required": True,
+            "ability": "edit",
+            "kind": "update",
             "forum_permission": "tag.edit",
+            "response_callback": core_write_tag_response,
         },
         {
             "name": "delete",
@@ -131,7 +133,7 @@ class TagResource(DatabaseResource):
             .set_with(_set_tag_is_primary),
             ResourceField("isRestricted", resolver=lambda tag, context: tag.is_restricted, module_id=EXTENSION_ID)
             .boolean()
-            .writable_when(_tag_restriction_writable)
+            .writable_when()
             .visible_when(_can_view_tag_admin_fields)
             .set_with(_set_tag_is_restricted),
             ResourceField("discussionCount", resolver=lambda tag, context: tag.discussion_count, module_id=EXTENSION_ID)
@@ -166,8 +168,17 @@ class TagResource(DatabaseResource):
             .set_with(_set_tag_is_primary),
             ResourceField("is_restricted", resolver=lambda tag, context: tag.is_restricted, module_id=EXTENSION_ID)
             .boolean()
-            .writable_when(_tag_restriction_writable)
+            .writable_when()
             .visible_when(_can_view_tag_admin_fields),
+            ResourceField("parent_id", resolver=lambda tag, context: tag.parent_id, module_id=EXTENSION_ID)
+            .integer()
+            .writable_when()
+            .nullable_field(),
+            ResourceField("parentId", resolver=lambda tag, context: tag.parent_id, module_id=EXTENSION_ID)
+            .integer()
+            .writable_when()
+            .nullable_field()
+            .set_with(_set_tag_parent_id),
         ]
 
     def endpoints(self) -> list:
@@ -176,10 +187,17 @@ class TagResource(DatabaseResource):
             for spec in tag_endpoint_specs()
         ]
 
+    def accepts_legacy_payload(self, context) -> bool:
+        return True
+
+    def jsonapi_types(self) -> tuple[str, ...]:
+        return ("tag", "tags")
+
     def relationships(self) -> list:
         return [
             ResourceRelationship("parent", resolver=_resolve_tag_parent, module_id=EXTENSION_ID)
             .to_one("tag")
+            .nullable_field()
             .set_relationship_with(_set_tag_parent_relationship)
             .writable_when(_tag_parent_relationship_writable),
             ResourceRelationship("children", resolver=_resolve_tag_children, module_id=EXTENSION_ID)
@@ -229,6 +247,18 @@ class TagResource(DatabaseResource):
                 raise PermissionDenied("没有权限查看此标签")
             return True
         return super().can(user, ability, instance, context)
+
+    def create_action(self, instance, context):
+        from bias_ext_tags.backend.services import TagService
+
+        payload = _service_payload_from_instance(instance, context, creating=True)
+        return TagService.create_tag(user=context.get("user"), **payload)
+
+    def update_action(self, instance, context):
+        from bias_ext_tags.backend.services import TagService
+
+        payload = _service_payload_from_instance(instance, context, creating=False)
+        return TagService.update_tag(tag_id=instance.id, user=context.get("user"), **payload)
 
     def delete_action(self, instance, context) -> None:
         from bias_ext_tags.backend.services import TagService
@@ -343,3 +373,78 @@ def _validate_tag_color(value, context) -> None:
     if value is None or re.match(r"^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$", value):
         return
     raise ValueError("color must be a valid hex color")
+
+
+def _service_payload_from_instance(tag, context, *, creating: bool) -> dict:
+    attributes = _request_attributes(context)
+    output = {
+        "name": tag.name,
+        "slug": tag.slug,
+        "description": tag.description,
+        "color": tag.color,
+        "icon": tag.icon,
+        "background_url": getattr(tag, "background_url", ""),
+        "position": tag.position,
+        "default_sort": tag.default_sort,
+        "is_primary": tag.is_primary,
+        "parent_id": tag.parent_id,
+        "is_hidden": tag.is_hidden,
+        "is_restricted": tag.is_restricted,
+        "view_scope": getattr(tag, "view_scope", "public"),
+        "start_discussion_scope": getattr(tag, "start_discussion_scope", "members"),
+        "reply_scope": getattr(tag, "reply_scope", "members"),
+    }
+    if creating:
+        output["parent_id"] = tag.parent_id
+        return output
+
+    requested = {
+        "name": "name",
+        "slug": "slug",
+        "description": "description",
+        "color": "color",
+        "icon": "icon",
+        "background_url": "background_url",
+        "backgroundUrl": "background_url",
+        "position": "position",
+        "default_sort": "default_sort",
+        "defaultSort": "default_sort",
+        "is_primary": "is_primary",
+        "isPrimary": "is_primary",
+        "is_hidden": "is_hidden",
+        "isHidden": "is_hidden",
+        "is_restricted": "is_restricted",
+        "isRestricted": "is_restricted",
+        "view_scope": "view_scope",
+        "viewScope": "view_scope",
+        "start_discussion_scope": "start_discussion_scope",
+        "startDiscussionScope": "start_discussion_scope",
+        "reply_scope": "reply_scope",
+        "replyScope": "reply_scope",
+        "parent_id": "parent_id",
+        "parentId": "parent_id",
+    }
+    requested_values = {target: output[target] for source, target in requested.items() if source in attributes}
+    if _request_includes_parent_relationship(context):
+        requested_values["parent_id"] = tag.parent_id
+    return requested_values
+
+
+def _request_attributes(context) -> dict:
+    payload = context.get("payload") if isinstance(context, dict) else None
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if isinstance(data, dict):
+        attributes = data.get("attributes")
+        return dict(attributes) if isinstance(attributes, dict) else {}
+    return dict(payload) if isinstance(payload, dict) else {}
+
+
+def _request_includes_parent_relationship(context) -> bool:
+    payload = context.get("payload") if isinstance(context, dict) else None
+    data = payload.get("data") if isinstance(payload, dict) else None
+    relationships = data.get("relationships") if isinstance(data, dict) else None
+    return isinstance(relationships, dict) and "parent" in relationships
+
+
+def _set_tag_parent_id(tag, value, context) -> None:
+    tag.parent_id = value
