@@ -292,6 +292,17 @@
               />
               <div class="Form-help">{{ positionHelpText }}</div>
             </div>
+
+            <div class="Form-group">
+              <label class="Form-labelStrong">{{ tagsCopy?.defaultSortLabel || '默认讨论排序' }}</label>
+              <AdminSelectMenu
+                input-id="tag-default-sort-select"
+                v-model="formData.default_sort"
+                :options="tagDefaultSortOptions"
+                :aria-label="tagsCopy?.defaultSortLabel || '默认讨论排序'"
+              />
+              <div class="Form-help">{{ tagsCopy?.defaultSortHelpText || '进入该标签讨论列表时使用的默认排序；留空时沿用论坛默认排序。' }}</div>
+            </div>
           </div>
 
           <div class="Form-group">
@@ -539,6 +550,12 @@ const tagsActionMeta = computed(() => getAdminPageActionMeta(PAGE_KEY))
 const tagColorPresets = computed(() => resolveConfiguredList(tagsConfig.value?.colorPresets, DEFAULT_COLOR_PRESETS))
 const tagScopeOptions = computed(() => resolveConfiguredList(tagsConfig.value?.scopeOptions, DEFAULT_SCOPE_OPTIONS))
 const tagIconOptions = computed(() => resolveConfiguredList(tagsConfig.value?.iconOptions, DEFAULT_ICON_OPTIONS))
+const tagDefaultSortOptions = computed(() => resolveConfiguredList(tagsConfig.value?.defaultSortOptions, [
+  { value: null, label: tagsCopy.value?.defaultSortForumOptionLabel || '论坛默认' },
+  { value: 'latest', label: tagsCopy.value?.defaultSortLatestOptionLabel || '最新回复' },
+  { value: 'top', label: tagsCopy.value?.defaultSortTopOptionLabel || '热门讨论' },
+  { value: 'newest', label: tagsCopy.value?.defaultSortNewestOptionLabel || '最新发布' },
+]))
 
 const formData = ref(getEmptyForm())
 
@@ -732,6 +749,7 @@ function editTag(tag) {
     icon: tag.icon,
     position: tag.position,
     parent_id: tag.parent_id ?? null,
+    default_sort: tag.default_sort ?? null,
     is_primary: Boolean(tag.is_primary),
     is_hidden: Boolean(tag.is_hidden),
     is_restricted: Boolean(tag.is_restricted),
@@ -763,6 +781,7 @@ async function saveTag() {
       icon: (formData.value.icon || '').trim(),
       position: formData.value.is_primary || formData.value.parent_id ? Number(formData.value.position || 0) : null,
       parent_id: formData.value.parent_id ?? null,
+      default_sort: normalizeDefaultSort(formData.value.default_sort),
       is_primary: Boolean(formData.value.parent_id || formData.value.is_primary),
       is_hidden: Boolean(formData.value.is_hidden),
       is_restricted: Boolean(formData.value.is_restricted),
@@ -894,6 +913,7 @@ function getEmptyForm(overrides = {}) {
     color: '#888888',
     icon: '',
     position: 0,
+    default_sort: null,
     parent_id: null,
     is_primary: true,
     is_hidden: false,
@@ -911,6 +931,11 @@ function resolveConfiguredList(value, fallback) {
 
 function normalizeColor(value) {
   return String(value || '').trim().toLowerCase()
+}
+
+function normalizeDefaultSort(value) {
+  const normalized = String(value || '').trim()
+  return normalized || null
 }
 
 function getScopeLabel(scope) {

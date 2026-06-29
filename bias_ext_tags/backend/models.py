@@ -23,6 +23,7 @@ class Tag(models.Model):
     icon = models.CharField(max_length=100, blank=True)
     background_url = models.URLField(max_length=500, blank=True)
     position = models.IntegerField(null=True, blank=True, default=0)
+    default_sort = models.CharField(max_length=50, null=True, blank=True)
     is_primary = models.BooleanField(default=True)
     parent = models.ForeignKey(
         "self",

@@ -33,6 +33,7 @@ def serialize_admin_tag(tag: Tag):
         "color": tag.color or "#888",
         "icon": tag.icon,
         "position": tag.position,
+        "default_sort": tag.default_sort,
         "is_primary": TagService.is_primary_tree_tag(tag),
         "parent_id": tag.parent_id,
         "parent_name": tag.parent.name if tag.parent else None,
@@ -95,6 +96,7 @@ def create_admin_tag(request, payload: dict = Body(...)):
             color=normalized.get("color") or "#888",
             icon=(normalized.get("icon") or "").strip(),
             position=normalize_tag_position(normalized, parent_id=parent_id),
+            default_sort=normalized.get("default_sort"),
             is_primary=normalized.get("is_primary", True),
             parent_id=parent_id,
             is_hidden=bool(normalized.get("is_hidden", False)),
@@ -173,6 +175,8 @@ def update_admin_tag(request, tag_id: int, payload: dict = Body(...)):
             update_payload["icon"] = (normalized.get("icon") or "").strip()
         if "position" in normalized:
             update_payload["position"] = None if normalized.get("position") is None else int(normalized["position"])
+        if "default_sort" in normalized:
+            update_payload["default_sort"] = normalized.get("default_sort")
         if "is_primary" in normalized:
             update_payload["is_primary"] = bool(normalized["is_primary"])
         if "parent_id" in normalized:

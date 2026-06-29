@@ -1284,6 +1284,33 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(delete_response.status_code, 200, delete_response.content)
         self.assertFalse(Tag.objects.filter(id=tag_id).exists())
 
+    def test_tag_resource_persists_default_sort(self):
+        create_response = self.client.post(
+            "/api/tags",
+            data=json.dumps({
+                "name": "默认排序标签",
+                "slug": "default-sort-tag",
+                "default_sort": "latest",
+            }),
+            content_type="application/json",
+            **self.auth_header(self.admin),
+        )
+
+        self.assertEqual(create_response.status_code, 200, create_response.content)
+        self.assertEqual(create_response.json()["default_sort"], "latest")
+
+        tag_id = create_response.json()["id"]
+        update_response = self.client.patch(
+            f"/api/tags/{tag_id}",
+            data=json.dumps({"default_sort": "top"}),
+            content_type="application/json",
+            **self.auth_header(self.admin),
+        )
+
+        self.assertEqual(update_response.status_code, 200, update_response.content)
+        self.assertEqual(update_response.json()["default_sort"], "top")
+        self.assertEqual(Tag.objects.get(id=tag_id).default_sort, "top")
+
     def test_member_with_tag_management_permissions_can_use_resource_endpoints(self):
         group = Group.objects.create(name="ResourceTagManagers", color="#4d698e")
         Permission.objects.create(group=group, permission="tag.create")
@@ -4869,6 +4896,7 @@ class AdminTagManagementApiTests(TestCase):
                 "view_scope": "members",
                 "start_discussion_scope": "staff",
                 "reply_scope": "members",
+                "default_sort": "latest",
             }),
             content_type="application/json",
             **self.auth_header(),
@@ -4884,10 +4912,12 @@ class AdminTagManagementApiTests(TestCase):
         self.assertEqual(payload["view_scope"], "members")
         self.assertEqual(payload["start_discussion_scope"], "staff")
         self.assertEqual(payload["reply_scope"], "members")
+        self.assertEqual(payload["default_sort"], "latest")
 
         created_tag = Tag.objects.get(id=payload["id"])
         self.assertEqual(created_tag.parent_id, self.parent_tag.id)
         self.assertEqual(created_tag.view_scope, "members")
+        self.assertEqual(created_tag.default_sort, "latest")
 
         response = self.client.put(
             f"/api/admin/tags/{created_tag.id}",
@@ -4901,6 +4931,7 @@ class AdminTagManagementApiTests(TestCase):
                 "view_scope": "public",
                 "start_discussion_scope": "members",
                 "reply_scope": "staff",
+                "default_sort": "top",
             }),
             content_type="application/json",
             **self.auth_header(),
@@ -4917,10 +4948,12 @@ class AdminTagManagementApiTests(TestCase):
         self.assertEqual(payload["view_scope"], "public")
         self.assertEqual(payload["start_discussion_scope"], "members")
         self.assertEqual(payload["reply_scope"], "staff")
+        self.assertEqual(payload["default_sort"], "top")
 
         created_tag.refresh_from_db()
         self.assertIsNone(created_tag.parent_id)
         self.assertEqual(created_tag.position, 6)
+        self.assertEqual(created_tag.default_sort, "top")
         self.assertEqual(created_tag.reply_scope, "staff")
 
     def test_admin_can_create_secondary_root_and_promote_to_primary(self):

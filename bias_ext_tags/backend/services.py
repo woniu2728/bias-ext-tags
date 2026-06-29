@@ -665,6 +665,11 @@ class TagService:
             counter += 1
 
     @staticmethod
+    def normalize_default_sort(value: Optional[str]) -> Optional[str]:
+        normalized = str(value or "").strip()
+        return normalized or None
+
+    @staticmethod
     def to_tag_slug(tag: Tag, *, driver: str | None = None) -> str:
         runtime_slug = to_runtime_model_slug(Tag, tag, identifier=driver)
         if runtime_slug:
@@ -740,6 +745,7 @@ class TagService:
         icon: str = "",
         background_url: str = "",
         position: Optional[int] = 0,
+        default_sort: Optional[str] = None,
         is_primary: Optional[bool] = True,
         parent_id: Optional[int] = None,
         is_hidden: bool = False,
@@ -813,6 +819,7 @@ class TagService:
                 icon=icon,
                 background_url=background_url,
                 position=normalized_position,
+                default_sort=TagService.normalize_default_sort(default_sort),
                 is_primary=normalized_is_primary,
                 parent=parent,
                 is_hidden=is_hidden,
@@ -914,6 +921,7 @@ class TagService:
         icon: Optional[str] = None,
         background_url: Optional[str] = None,
         position: Optional[int] = None,
+        default_sort: Optional[str] = None,
         is_primary: Optional[bool] = None,
         parent_id: Any = _UNSET,
         is_hidden: Optional[bool] = None,
@@ -963,6 +971,9 @@ class TagService:
 
             if background_url is not None:
                 tag.background_url = background_url
+
+            if default_sort is not None:
+                tag.default_sort = TagService.normalize_default_sort(default_sort)
 
             if parent_id is not _UNSET:
                 if parent_id in ("", 0, "0", None):

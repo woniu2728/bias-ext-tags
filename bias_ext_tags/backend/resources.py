@@ -267,6 +267,7 @@ def serialize_tag_base(tag, context: dict) -> dict:
         "icon": tag.icon,
         "background_url": tag.background_url,
         "position": tag.position,
+        "default_sort": tag.default_sort,
         "parent_id": tag.parent_id,
         "is_hidden": tag.is_hidden,
         "is_primary": TagService.is_primary_tree_tag(tag),
