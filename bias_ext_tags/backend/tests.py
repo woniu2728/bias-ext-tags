@@ -1379,6 +1379,52 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(delete_response.status_code, 200, delete_response.content)
         self.assertFalse(Tag.objects.filter(id=tag_id).exists())
 
+    def test_tag_editor_can_include_hidden_tags_without_staff_flag(self):
+        hidden_parent = Tag.objects.create(
+            name="隐藏父标签",
+            slug="hidden-editor-parent",
+            is_hidden=True,
+            position=5,
+            is_primary=True,
+        )
+        hidden_child = Tag.objects.create(
+            name="隐藏子标签",
+            slug="hidden-editor-child",
+            parent=hidden_parent,
+            is_hidden=True,
+            position=0,
+            is_primary=True,
+        )
+
+        denied_response = self.client.get(
+            "/api/tags",
+            {"include_hidden": True},
+            **self.auth_header(self.member),
+        )
+        self.assertEqual(denied_response.status_code, 200, denied_response.content)
+        denied_slugs = {tag["slug"] for tag in denied_response.json()["data"]}
+        self.assertNotIn(hidden_parent.slug, denied_slugs)
+
+        group = Group.objects.create(name="HiddenTagEditors", color="#4d698e")
+        Permission.objects.create(group=group, permission="tag.edit")
+        self.member.user_groups.add(group)
+        if hasattr(self.member, "_forum_permission_cache"):
+            delattr(self.member, "_forum_permission_cache")
+
+        allowed_response = self.client.get(
+            "/api/tags",
+            {"include_hidden": True},
+            **self.auth_header(self.member),
+        )
+
+        self.assertEqual(allowed_response.status_code, 200, allowed_response.content)
+        payload_by_slug = {tag["slug"]: tag for tag in allowed_response.json()["data"]}
+        self.assertIn(hidden_parent.slug, payload_by_slug)
+        self.assertEqual(
+            [child["slug"] for child in payload_by_slug[hidden_parent.slug]["children"]],
+            [hidden_child.slug],
+        )
+
     def test_public_tag_payload_hides_admin_only_access_fields(self):
         tag = Tag.objects.create(
             name="受限可见",

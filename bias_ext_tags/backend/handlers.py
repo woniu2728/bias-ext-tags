@@ -89,7 +89,7 @@ def _serialize_tag(
                 resource_options=resource_options,
             )
             for child in _get_prefetched_children(tag)
-            if not child.is_hidden and child.id not in forbidden_tag_ids
+            if (context.get("include_hidden") or not child.is_hidden) and child.id not in forbidden_tag_ids
         ]
 
     payload["children"] = children
@@ -152,6 +152,10 @@ def _tag_bool_query_value(context, key: str, default=False):
     return default
 
 
+def _can_include_hidden_tags(user) -> bool:
+    return TagService.can_manage_tags(user, "tag.edit")
+
+
 def _tag_purpose_query_value(context):
     purpose = str(_tag_query_value(context, "purpose", "view") or "view")
     if purpose not in {"view", "start_discussion", "add_to_discussion", "reply"}:
@@ -196,7 +200,7 @@ def dispatch_tag_index(context):
     children_requested = include_children or "children" in resource_options.includes
     purpose = _tag_purpose_query_value(context)
     discussion_tag_ids = _tag_current_discussion_tag_ids(context) if purpose == "add_to_discussion" else ()
-    if include_hidden and (not user or not user.is_staff):
+    if include_hidden and not _can_include_hidden_tags(user):
         include_hidden = False
 
     queryset = Tag.objects.select_related("last_posted_discussion").all()
@@ -234,6 +238,7 @@ def dispatch_tag_index(context):
     tags = queryset.distinct().order_by(*TagService.structure_order_by())
 
     serialize_context = _build_tag_serialize_context(user, action=purpose)
+    serialize_context["include_hidden"] = include_hidden
     return {
         "data": [
             _serialize_tag(
