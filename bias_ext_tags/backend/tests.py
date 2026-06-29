@@ -75,6 +75,10 @@ def set_runtime_discussion_hidden_state(*args, **kwargs):
     return _runtime_facade("set_runtime_discussion_hidden_state")(*args, **kwargs)
 
 
+def list_runtime_discussions(*args, **kwargs):
+    return _runtime_facade("list_runtime_discussions")(*args, **kwargs)
+
+
 def to_runtime_model_slug(*args, **kwargs):
     return _runtime_facade("to_runtime_model_slug")(*args, **kwargs)
 
@@ -3903,8 +3907,6 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual([item["id"] for item in response.json()["data"]], [discussion.id])
 
     def test_hidden_tag_discussions_are_not_hidden_when_search_filter_is_active(self):
-        from bias_ext_discussions.backend.services import DiscussionService
-
         hidden_tag = Tag.objects.create(name="隐藏", slug="hidden-token-list", is_hidden=True)
         discussion = create_runtime_discussion(
             title="隐藏标签 token 过滤讨论",
@@ -3928,7 +3930,7 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
             applier=apply_filter,
         ))
 
-        discussions, total = DiscussionService.get_discussion_list(q="token:yes", user=self.author)
+        discussions, total = list_runtime_discussions(q="token:yes", user=self.author)
 
         self.assertEqual(total, 1)
         self.assertEqual([item.id for item in discussions], [discussion.id])
