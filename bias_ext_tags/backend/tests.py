@@ -1425,6 +1425,41 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
             [hidden_child.slug],
         )
 
+    def test_tag_editor_include_children_relationship_respects_include_hidden(self):
+        hidden_parent = Tag.objects.create(
+            name="隐藏关系父标签",
+            slug="hidden-relationship-parent",
+            is_hidden=True,
+            position=6,
+            is_primary=True,
+        )
+        hidden_child = Tag.objects.create(
+            name="隐藏关系子标签",
+            slug="hidden-relationship-child",
+            parent=hidden_parent,
+            is_hidden=True,
+            position=0,
+            is_primary=True,
+        )
+        group = Group.objects.create(name="HiddenTagRelationshipEditors", color="#4d698e")
+        Permission.objects.create(group=group, permission="tag.edit")
+        self.member.user_groups.add(group)
+        if hasattr(self.member, "_forum_permission_cache"):
+            delattr(self.member, "_forum_permission_cache")
+
+        response = self.client.get(
+            "/api/tags",
+            {"include": "children", "include_hidden": True},
+            **self.auth_header(self.member),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload_by_slug = {tag["slug"]: tag for tag in response.json()["data"]}
+        self.assertEqual(
+            [child["slug"] for child in payload_by_slug[hidden_parent.slug]["children"]],
+            [hidden_child.slug],
+        )
+
     def test_public_tag_payload_hides_admin_only_access_fields(self):
         tag = Tag.objects.create(
             name="受限可见",

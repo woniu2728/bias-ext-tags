@@ -475,7 +475,7 @@ def resolve_tag_children(tag, context: dict) -> list[Tag]:
     return [
         child
         for child in children
-        if not child.is_hidden and child.id not in forbidden_tag_ids
+        if (context.get("include_hidden") or not child.is_hidden) and child.id not in forbidden_tag_ids
     ]
 
 
