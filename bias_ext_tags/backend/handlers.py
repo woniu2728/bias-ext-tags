@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from django.core.exceptions import PermissionDenied
-from django.db.models import Prefetch
-from django.db.models import Q
 from django.http import HttpResponse, JsonResponse
 from ninja import Body
 
@@ -12,7 +10,6 @@ from bias_core.extensions.platform import resolve_authenticated_user
 from bias_core.extensions.platform import ResourceQueryOptions, parse_resource_query_options
 from bias_core.extensions.platform import merge_resource_includes
 from bias_ext_tags.backend.models import Tag
-from bias_ext_tags.backend.schemas import TagCreateSchema, TagUpdateSchema
 from bias_ext_tags.backend.services import TagService
 
 
@@ -197,67 +194,6 @@ def _tag_query_value(context, key: str, default=None):
     return dict(context.get("query") or {}).get(key, default)
 
 
-def _tag_payload(context) -> dict:
-    payload = context.get("payload")
-    if not isinstance(payload, dict):
-        return {}
-    data = payload.get("data")
-    if not isinstance(data, dict):
-        return _normalize_tag_payload_attributes(dict(payload))
-
-    attributes = data.get("attributes")
-    normalized = dict(attributes) if isinstance(attributes, dict) else {}
-    normalized = _normalize_tag_payload_attributes(normalized)
-    relationships = data.get("relationships")
-    if isinstance(relationships, dict) and "parent" in relationships:
-        normalized["parent_id"] = _tag_relationship_id(relationships.get("parent"))
-    return normalized
-
-
-def _normalize_tag_payload_attributes(attributes: dict) -> dict:
-    normalized = dict(attributes)
-    aliases = {
-        "backgroundUrl": "background_url",
-        "defaultSort": "default_sort",
-        "isHidden": "is_hidden",
-        "isPrimary": "is_primary",
-        "isRestricted": "is_restricted",
-        "parentId": "parent_id",
-        "replyScope": "reply_scope",
-        "startDiscussionScope": "start_discussion_scope",
-        "viewScope": "view_scope",
-    }
-    for source, target in aliases.items():
-        if source in normalized and target not in normalized:
-            normalized[target] = normalized[source]
-    return normalized
-
-
-def _tag_relationship_id(value):
-    if isinstance(value, dict) and "data" in value:
-        value = value.get("data")
-    if value in (None, ""):
-        return None
-    if isinstance(value, dict):
-        value = value.get("id")
-    try:
-        normalized = int(value)
-    except (TypeError, ValueError):
-        return None
-    return normalized if normalized > 0 else None
-
-
-def _tag_object_id(context) -> int:
-    try:
-        return int(context.get("object_id") or 0)
-    except (TypeError, ValueError):
-        return 0
-
-
-def _tag_object_slug(context) -> str:
-    return str(context.get("object_id") or "").strip()
-
-
 def _tag_int_query_value(context, key: str):
     value = _tag_query_value(context, key)
     if value is None or value == "":
@@ -291,104 +227,6 @@ def _tag_purpose_query_value(context):
     if purpose not in {"view", "start_discussion", "add_to_discussion", "reply"}:
         return "view"
     return purpose
-
-
-def dispatch_tag_create(context):
-    payload = TagCreateSchema(**_tag_payload(context))
-    try:
-        tag = TagService.create_tag(
-            name=payload.name,
-            slug=payload.slug,
-            description=payload.description or "",
-            color=payload.color or "",
-            icon=payload.icon or "",
-            background_url=payload.background_url or "",
-            position=payload.position,
-            default_sort=payload.default_sort,
-            is_primary=payload.is_primary,
-            parent_id=payload.parent_id,
-            is_hidden=payload.is_hidden or False,
-            is_restricted=payload.is_restricted or False,
-            view_scope=payload.view_scope or Tag.ACCESS_PUBLIC,
-            start_discussion_scope=payload.start_discussion_scope or Tag.ACCESS_MEMBERS,
-            reply_scope=payload.reply_scope or Tag.ACCESS_MEMBERS,
-            user=context["user"],
-        )
-        jsonapi_response = _jsonapi_tag_response(tag, context, action="view", status=201)
-        if jsonapi_response is not None:
-            return jsonapi_response
-        return _serialize_tag(tag, user=context["user"], include_children=True)
-    except PermissionDenied as e:
-        return api_error(str(e), status=403)
-    except ValueError as e:
-        return api_error(str(e), status=400)
-
-
-def dispatch_tag_index(context):
-    request = context["request"]
-    user = context.get("user")
-    resource_options = _tag_resource_options(context)
-    include_hidden = _tag_bool_query_value(context, "include_hidden", False)
-    include_children = _tag_bool_query_value(context, "include_children", True)
-    children_requested = include_children or "children" in resource_options.includes
-    purpose = _tag_purpose_query_value(context)
-    discussion_tag_ids = _tag_current_discussion_tag_ids(context) if purpose == "add_to_discussion" else ()
-    if include_hidden and not _can_include_hidden_tags(user):
-        include_hidden = False
-
-    queryset = Tag.objects.select_related("last_posted_discussion").all()
-    if children_requested:
-        visible_child_queryset = Tag.objects.select_related("last_posted_discussion").order_by(*TagService.child_order_by())
-        if not include_hidden:
-            visible_child_queryset = visible_child_queryset.filter(is_hidden=False)
-        visible_child_queryset = TagService.filter_tags_for_user(visible_child_queryset, user, action=purpose)
-        if discussion_tag_ids:
-            visible_child_queryset = visible_child_queryset | Tag.objects.filter(id__in=discussion_tag_ids)
-        queryset = queryset.prefetch_related(
-            Prefetch("children", queryset=visible_child_queryset, to_attr="visible_children")
-        )
-    queryset = _apply_tag_resource_preloads(
-        queryset,
-        user=user,
-        action=purpose,
-        resource_options=resource_options,
-    )
-
-    parent_id = _tag_int_query_value(context, "parent_id")
-    if parent_id is None:
-        queryset = queryset.filter(parent__isnull=True)
-    else:
-        queryset = queryset.filter(parent_id=parent_id)
-
-    if not include_hidden:
-        queryset = queryset.filter(is_hidden=False)
-
-    queryset = TagService.filter_tags_for_user(queryset, user, action=purpose)
-    if discussion_tag_ids:
-        queryset = queryset | Tag.objects.filter(
-            Q(id__in=discussion_tag_ids) | Q(children__id__in=discussion_tag_ids)
-        )
-    tags = queryset.distinct().order_by(*TagService.structure_order_by())
-
-    serialize_context = _build_tag_serialize_context(user, action=purpose)
-    serialize_context["include_hidden"] = include_hidden
-    tag_list = list(tags)
-    jsonapi_response = _jsonapi_tags_response(tag_list, context, action=purpose)
-    if jsonapi_response is not None:
-        return jsonapi_response
-    return {
-        "data": [
-            _serialize_tag(
-                tag,
-                user=user,
-                include_children=include_children,
-                action=purpose,
-                context=serialize_context,
-                resource_options=resource_options,
-            )
-            for tag in tag_list
-        ]
-    }
 
 
 def _tag_current_discussion_tag_ids(context) -> tuple[int, ...]:
@@ -435,38 +273,6 @@ def dispatch_tag_popular(context):
             for tag in tag_list
         ]
     }
-
-
-def _load_visible_tag(tag, user, resource_options):
-    if not tag:
-        return None
-    tag = _apply_tag_resource_preloads(
-        Tag.objects.select_related("last_posted_discussion").prefetch_related("children").filter(id=tag.id),
-        user=user,
-        action="view",
-        resource_options=resource_options,
-    ).get()
-    if not TagService.can_view_tag(tag, user):
-        return api_error("没有权限查看此标签", status=403)
-    return tag
-
-
-def dispatch_tag_show(context):
-    request = context["request"]
-    user = context.get("user")
-    resource_options = _tag_resource_options(context)
-    tag = _resolve_tag_route_object(context)
-    if tag is None:
-        return api_error("标签不存在", status=404)
-    tag = _load_visible_tag(tag, user, resource_options)
-    if tag is None:
-        return api_error("标签不存在", status=404)
-    if hasattr(tag, "status_code"):
-        return tag
-    jsonapi_response = _jsonapi_tag_response(tag, context, action="view")
-    if jsonapi_response is not None:
-        return jsonapi_response
-    return _serialize_tag(tag, user=user, include_children=True, resource_options=resource_options)
 
 
 def core_show_tag_response(context, response):
@@ -534,87 +340,6 @@ def core_delete_tag_response(context, response):
     if _wants_jsonapi_response(context):
         return response
     return {"message": "标签已删除"}
-
-
-def dispatch_tag_show_by_slug(context):
-    request = context["request"]
-    user = context.get("user")
-    resource_options = _tag_resource_options(context)
-    tag = _resolve_tag_route_object(context)
-    tag = _load_visible_tag(tag, user, resource_options)
-    if tag is None:
-        return api_error("标签不存在", status=404)
-    if hasattr(tag, "status_code"):
-        return tag
-    jsonapi_response = _jsonapi_tag_response(tag, context, action="view")
-    if jsonapi_response is not None:
-        return jsonapi_response
-    return _serialize_tag(tag, user=user, include_children=True, resource_options=resource_options)
-
-
-def _resolve_tag_route_object(context):
-    object_slug = _tag_object_slug(context)
-    if object_slug.isdigit():
-        tag = TagService.get_tag_by_id(int(object_slug))
-        if tag is not None:
-            return tag
-    tag = TagService.get_tag_by_url_slug(object_slug)
-    if tag is None:
-        tag = TagService.get_tag_by_url_slug(object_slug, driver="id_with_slug")
-    return tag
-
-
-def dispatch_tag_update(context):
-    raw_payload = _tag_payload(context)
-    payload = TagUpdateSchema(**raw_payload)
-    update_kwargs = {
-        "tag_id": _tag_object_id(context),
-        "user": context["user"],
-        "name": payload.name,
-        "slug": payload.slug,
-        "description": payload.description,
-        "color": payload.color,
-        "icon": payload.icon,
-        "background_url": payload.background_url,
-        "position": payload.position,
-        "default_sort": payload.default_sort,
-        "is_primary": payload.is_primary,
-        "is_hidden": payload.is_hidden,
-        "is_restricted": payload.is_restricted,
-        "view_scope": payload.view_scope,
-        "start_discussion_scope": payload.start_discussion_scope,
-        "reply_scope": payload.reply_scope,
-    }
-    if "parent_id" in raw_payload:
-        update_kwargs["parent_id"] = payload.parent_id
-    try:
-        tag = TagService.update_tag(**update_kwargs)
-
-        tag = Tag.objects.select_related("last_posted_discussion").prefetch_related("children").get(id=tag.id)
-        jsonapi_response = _jsonapi_tag_response(tag, context, action="view")
-        if jsonapi_response is not None:
-            return jsonapi_response
-        return _serialize_tag(tag, user=context["user"], include_children=True)
-    except Tag.DoesNotExist:
-        return api_error("标签不存在", status=404)
-    except PermissionDenied as e:
-        return api_error(str(e), status=403)
-    except ValueError as e:
-        return api_error(str(e), status=400)
-
-
-def dispatch_tag_delete(context):
-    try:
-        TagService.delete_tag(_tag_object_id(context), context["user"])
-        if _wants_jsonapi_response(context):
-            return HttpResponse(status=204)
-        return {"message": "标签已删除"}
-    except Tag.DoesNotExist:
-        return api_error("标签不存在", status=404)
-    except PermissionDenied as e:
-        return api_error(str(e), status=403)
-    except ValueError as e:
-        return api_error(str(e), status=400)
 
 
 def order_tags_api_route(request, payload: dict = Body(...)):
