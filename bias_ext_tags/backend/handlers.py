@@ -21,6 +21,7 @@ from bias_ext_tags.backend.responses import (
     serialize_tag as _serialize_tag,
     wants_tag_jsonapi_response as _wants_jsonapi_response,
 )
+from bias_ext_tags.backend.services import TagService
 
 __all__ = [
     "_apply_tag_resource_preloads",
@@ -40,4 +41,5 @@ __all__ = [
     "core_show_tag_response",
     "core_write_tag_response",
     "dispatch_tag_popular",
+    "TagService",
 ]

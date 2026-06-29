@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from bias_core.extensions.platform import ResourceQueryOptions, serialize_resource_jsonapi_response, serialize_resource_plain, wants_jsonapi_response
+from bias_core.extensions.platform import ResourceQueryOptions, merge_resource_includes, serialize_resource_jsonapi_response, serialize_resource_plain, wants_jsonapi_response
 from bias_ext_tags.backend.models import Tag
 from bias_ext_tags.backend.preloads import apply_tag_resource_preloads
 from bias_ext_tags.backend.query_params import (
@@ -39,12 +39,6 @@ def get_forbidden_tag_ids(context, user=None, action="view"):
     return cache["forbidden_tag_ids"]
 
 
-def get_prefetched_children(tag):
-    if hasattr(tag, "visible_children"):
-        return tag.visible_children
-    return tag.children.all().order_by(*TagService.child_order_by())
-
-
 def serialize_tag(
     tag,
     user=None,
@@ -57,32 +51,22 @@ def serialize_tag(
     context.setdefault("user", user)
     context.setdefault("action", action)
     resource_options = resource_options or ResourceQueryOptions()
+    includes = resource_options.includes
+    if include_children or "children" in includes:
+        includes = merge_resource_includes(includes, ("children", "children.children"))
+        context = {**context, "plain_children_depth": 1}
+    child_resource_options = ResourceQueryOptions(
+        includes=includes,
+        fields=resource_options.fields,
+    )
     payload = serialize_resource_plain(
         get_resource_registry(),
         "tag",
         tag,
         context,
-        resource_options=resource_options,
+        resource_options=child_resource_options,
     )
-    if "children" in resource_options.includes:
-        return payload
-    children = []
-    if include_children:
-        forbidden_tag_ids = get_forbidden_tag_ids(context, user=user, action=action)
-        children = [
-            serialize_tag(
-                child,
-                user=user,
-                include_children=False,
-                action=action,
-                context=context,
-                resource_options=resource_options,
-            )
-            for child in get_prefetched_children(tag)
-            if (context.get("include_hidden") or not child.is_hidden) and child.id not in forbidden_tag_ids
-        ]
-
-    payload["children"] = children
+    payload.setdefault("children", [])
     return payload
 
 
