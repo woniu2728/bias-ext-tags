@@ -305,14 +305,22 @@ class TagResource(DatabaseResource):
 
         normalized = str(object_id or "").strip()
         if normalized.isdigit():
-            tag = Tag.objects.select_related("last_posted_discussion", "parent").filter(id=int(normalized)).first()
+            tag = self._detail_queryset(context).filter(id=int(normalized)).first()
             if tag is not None:
                 return tag
 
         tag = TagService.get_tag_by_url_slug(normalized)
         if tag is None:
             tag = TagService.get_tag_by_url_slug(normalized, driver="id_with_slug")
+        if tag is not None:
+            return self._detail_queryset(context).filter(id=tag.id).first()
         return tag
+
+    def _detail_queryset(self, context):
+        from bias_ext_tags.backend.services import TagService
+
+        queryset = Tag.objects.select_related("last_posted_discussion", "parent")
+        return TagService.prefetch_state_for_user(queryset, context.get("user"))
 
     def can(self, user, ability: str, instance, context) -> bool:
         from django.core.exceptions import PermissionDenied

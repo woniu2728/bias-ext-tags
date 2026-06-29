@@ -2475,6 +2475,32 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertIsNotNone(payload["state"]["marked_as_read_at"])
         self.assertEqual(TagState.objects.get(tag=self.members_tag, user=self.member).id, marked_state.id)
 
+    def test_tag_detail_prefetches_actor_tag_state_like_flarum_show_scope(self):
+        TagState.objects.create(
+            tag=self.members_tag,
+            user=self.member,
+            is_hidden=True,
+        )
+
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get(
+                f"/api/tags/{self.members_tag.id}",
+                **self.auth_header(self.member),
+            )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(response.json()["state"]["is_hidden"])
+        state_queries = [
+            query["sql"]
+            for query in queries
+            if 'from "tag_user"' in query["sql"].lower()
+        ]
+        self.assertEqual(
+            len(state_queries),
+            1,
+            "Tag detail should preload the actor state during lookup instead of querying again while serializing.",
+        )
+
     def test_tag_detail_omits_actor_tag_state_for_guest(self):
         response = self.client.get(f"/api/tags/{self.public_tag.id}")
 
