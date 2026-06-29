@@ -2429,6 +2429,95 @@ class TagSearchApiTests(ExtensionRuntimeTestMixin, TestCase):
             {first_discussion.id, second_discussion.id},
         )
 
+    def test_search_api_tag_filter_supports_negated_slug(self):
+        excluded_tag = Tag.objects.create(name="搜索排除标签", slug="search-excluded-tag")
+        included_tag = Tag.objects.create(name="搜索保留标签", slug="search-included-tag")
+        create_runtime_discussion(
+            title="排除标签讨论",
+            content="shared-negated-filter-keyword",
+            user=self.user,
+            extension_payload=discussion_tags_payload([excluded_tag.id]),
+        )
+        matched = create_runtime_discussion(
+            title="保留标签讨论",
+            content="shared-negated-filter-keyword",
+            user=self.user,
+            extension_payload=discussion_tags_payload([included_tag.id]),
+        )
+
+        response = self.client.get(
+            "/api/search",
+            {"q": "shared-negated-filter-keyword -tag:search-excluded-tag", "type": "discussions"},
+            **self.auth_header(),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertEqual(payload["discussion_total"], 1)
+        self.assertEqual([item["id"] for item in payload["discussions"]], [matched.id])
+
+    def test_search_api_tag_filter_supports_negated_untagged(self):
+        tagged = Tag.objects.create(name="搜索保留已标记", slug="search-keep-tagged")
+        matched = create_runtime_discussion(
+            title="已标记保留讨论",
+            content="shared-negated-untagged-keyword",
+            user=self.user,
+            extension_payload=discussion_tags_payload([tagged.id]),
+        )
+        create_runtime_discussion(
+            title="未标记排除讨论",
+            content="shared-negated-untagged-keyword",
+            user=self.user,
+        )
+
+        response = self.client.get(
+            "/api/search",
+            {"q": "shared-negated-untagged-keyword -tag:untagged", "type": "discussions"},
+            **self.auth_header(),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertEqual(payload["discussion_total"], 1)
+        self.assertEqual([item["id"] for item in payload["discussions"]], [matched.id])
+
+    def test_search_api_posts_tag_filter_supports_negated_slug(self):
+        excluded_tag = Tag.objects.create(name="帖子排除标签", slug="post-excluded-tag")
+        included_tag = Tag.objects.create(name="帖子保留标签", slug="post-included-tag")
+        excluded_discussion = create_runtime_discussion(
+            title="帖子排除讨论",
+            content="excluded starter",
+            user=self.user,
+            extension_payload=discussion_tags_payload([excluded_tag.id]),
+        )
+        included_discussion = create_runtime_discussion(
+            title="帖子保留讨论",
+            content="included starter",
+            user=self.user,
+            extension_payload=discussion_tags_payload([included_tag.id]),
+        )
+        create_runtime_post(
+            discussion_id=excluded_discussion.id,
+            content="shared-negated-post-keyword",
+            user=self.user,
+        )
+        matched_post = create_runtime_post(
+            discussion_id=included_discussion.id,
+            content="shared-negated-post-keyword",
+            user=self.user,
+        )
+
+        response = self.client.get(
+            "/api/search",
+            {"q": "shared-negated-post-keyword -tag:post-excluded-tag", "type": "posts"},
+            **self.auth_header(),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertEqual(payload["post_total"], 1)
+        self.assertEqual([item["id"] for item in payload["posts"]], [matched_post.id])
+
     def test_search_api_tag_filter_supports_untagged_without_slug_lookup(self):
         tagged = Tag.objects.create(name="搜索已标记", slug="search-tagged")
         create_runtime_discussion(

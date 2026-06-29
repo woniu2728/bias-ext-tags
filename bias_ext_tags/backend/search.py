@@ -6,16 +6,21 @@ from bias_core.extensions.runtime import resolve_runtime_model_slugs
 from bias_ext_tags.backend.models import DiscussionTag, Tag
 
 
-def parse_tag_search_filter(token: str) -> str | None:
+def parse_tag_search_filter(token: str) -> dict | str | None:
     if not token or ":" not in token:
         return None
 
     prefix, value = token.split(":", 1)
+    negate = prefix.startswith("-")
+    if negate:
+        prefix = prefix[1:]
     if prefix.lower() != "tag":
         return None
 
     normalized = value.strip().lower()
-    return normalized or None
+    if not normalized:
+        return None
+    return {"value": normalized, "negate": negate} if negate else normalized
 
 
 def apply_discussion_tag_search_filter(queryset, tag_slug: str, context: dict):
@@ -78,19 +83,36 @@ def _apply_post_tag_filter(queryset, raw_value: str, context: dict):
 
 
 def _apply_tag_filter(queryset, raw_value: str, context: dict, *, discussion_ref: str):
-    groups = _tag_slug_groups(raw_value)
+    filter_groups = _tag_filter_groups(raw_value)
+    groups = tuple(group for group, _negate in filter_groups)
     if not groups:
         return queryset
 
     slug_to_id = _resolve_tag_slug_ids(groups, context)
     output = queryset
-    for group in groups:
+    for group, negate in filter_groups:
         condition = _discussion_tag_group_condition(group, slug_to_id, discussion_ref)
 
         if not condition:
+            if negate:
+                continue
             return queryset.none()
-        output = output.filter(condition)
+        output = output.exclude(condition) if negate else output.filter(condition)
     return output
+
+
+def _tag_filter_groups(raw_value) -> tuple[tuple[tuple[str, ...], bool], ...]:
+    groups: list[tuple[tuple[str, ...], bool]] = []
+    values = raw_value if isinstance(raw_value, (list, tuple)) else [raw_value]
+    for value in values:
+        negate = False
+        raw_group = value
+        if isinstance(value, dict):
+            raw_group = value.get("value")
+            negate = bool(value.get("negate"))
+        for group in _tag_slug_groups(raw_group):
+            groups.append((group, negate))
+    return tuple(groups)
 
 
 def _discussion_tag_group_condition(group: tuple[str, ...], slug_to_id: dict[str, int], discussion_ref: str):
