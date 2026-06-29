@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {
   createTagSelectionState,
   resolveRequestedSelection,
+  resolveTagSelectionRequirement,
   resolveTagSelectionLimits,
   summarizeSelectedTags,
 } from './tagSelectionState.js'
@@ -141,4 +142,53 @@ test('selected tag summary joins selected tag names', () => {
   })
 
   assert.equal(summarizeSelectedTags(state.selectedTags), '主一 / 子一')
+})
+
+test('tag selection requirement follows primary and secondary minimums', () => {
+  const state = createTagSelectionState({
+    tags,
+    primaryTagIds: [1],
+    settings: {
+      min_primary_tags: 1,
+      min_secondary_tags: 1,
+      max_secondary_tags: 2,
+    },
+  })
+
+  assert.deepEqual(state.requirement, {
+    code: 'min_secondary',
+    message: '当前至少需要选择 1 个次标签。',
+  })
+})
+
+test('tag selection requirement clears when configured counts are met', () => {
+  const state = createTagSelectionState({
+    tags,
+    primaryTagIds: [1],
+    secondaryTagIds: [11],
+    settings: {
+      min_primary_tags: 1,
+      min_secondary_tags: 1,
+      max_secondary_tags: 2,
+    },
+  })
+
+  assert.equal(state.requirement, null)
+  assert.equal(state.selectedPrimaryCount, 1)
+  assert.equal(state.selectedSecondaryCount, 1)
+})
+
+test('tag selection requirement respects bypass tag counts permission', () => {
+  assert.equal(resolveTagSelectionRequirement({
+    availableTagCount: 3,
+    bypassTagCounts: true,
+    limits: {
+      minPrimary: 1,
+      maxPrimary: 1,
+      minSecondary: 1,
+      maxSecondary: 1,
+    },
+    selectedPrimaryCount: 0,
+    selectedSecondaryCount: 0,
+  }), null)
 })

@@ -214,9 +214,12 @@ function syncState() {
     minSecondaryTagCount: tagLimits.value.minSecondary,
     primaryTagId: normalizedPrimaryIds[0] || '',
     primaryTagIds: normalizedPrimaryIds,
+    selectedPrimaryTagCount: selectionState.value.selectedPrimaryCount,
+    selectedSecondaryTagCount: selectionState.value.selectedSecondaryCount,
+    tagSelectionRequirement: selectionState.value.requirement,
     secondaryTagId: normalizedSecondaryIds[0] || '',
     secondaryTagIds: normalizedSecondaryIds,
-    selectedTagCount: selectedTagIds.value.length,
+    selectedTagCount: selectionState.value.selectedTagCount,
     selectedTagIds: selectedTagIds.value,
     selectedTagLabel: selectedTagLabel.value,
   })

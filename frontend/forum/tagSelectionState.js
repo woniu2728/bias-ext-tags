@@ -54,6 +54,14 @@ export function createTagSelectionState({
     .slice(0, limits.maxSecondary)
   const primaryTags = flatTags.filter(isPrimaryRootTag).sort(sortTagsByStructure)
   const rootSecondaryTags = flatTags.filter(isSecondaryRootTag).sort(sortTagsByStructure)
+  const selectedTagIds = [...selectedPrimaryIds, ...selectedSecondaryIds]
+  const requirement = resolveTagSelectionRequirement({
+    availableTagCount: primaryTags.length + secondaryOptions.length,
+    bypassTagCounts: settings.can_bypass_tag_counts,
+    limits,
+    selectedPrimaryCount: selectedPrimaryIds.length,
+    selectedSecondaryCount: selectedSecondaryIds.length,
+  })
 
   return {
     availableTagCount: primaryTags.length + secondaryOptions.length,
@@ -62,11 +70,73 @@ export function createTagSelectionState({
     primaryTags,
     rootSecondaryTags,
     secondaryOptions,
+    requirement,
     selectedPrimaryIds,
+    selectedPrimaryCount: selectedPrimaryIds.length,
     selectedSecondaryIds,
-    selectedTagIds: [...selectedPrimaryIds, ...selectedSecondaryIds],
-    selectedTags: [...selectedPrimaryIds, ...selectedSecondaryIds].map(tagId => byId.get(tagId)).filter(Boolean),
+    selectedSecondaryCount: selectedSecondaryIds.length,
+    selectedTagCount: selectedTagIds.length,
+    selectedTagIds,
+    selectedTags: selectedTagIds.map(tagId => byId.get(tagId)).filter(Boolean),
   }
+}
+
+export function resolveTagSelectionRequirement({
+  availableTagCount = 0,
+  bypassTagCounts = false,
+  limits = {},
+  selectedPrimaryCount = 0,
+  selectedSecondaryCount = 0,
+} = {}) {
+  if (bypassTagCounts) return null
+  if (Number(availableTagCount || 0) <= 0) {
+    return {
+      code: 'unavailable',
+      message: '当前没有可用标签，暂时无法发布讨论。',
+    }
+  }
+
+  const normalizedLimits = {
+    minPrimary: parseTagLimit(limits.minPrimary, 0),
+    maxPrimary: parseTagLimit(limits.maxPrimary, 1),
+    minSecondary: parseTagLimit(limits.minSecondary, 0),
+    maxSecondary: parseTagLimit(limits.maxSecondary, 1),
+  }
+  const primaryCount = Number(selectedPrimaryCount || 0)
+  const secondaryCount = Number(selectedSecondaryCount || 0)
+
+  if (primaryCount < normalizedLimits.minPrimary) {
+    return {
+      code: 'min_primary',
+      message: `当前至少需要选择 ${normalizedLimits.minPrimary} 个主标签。`,
+    }
+  }
+  if (primaryCount > normalizedLimits.maxPrimary) {
+    return {
+      code: 'max_primary',
+      message: `当前最多只能选择 ${normalizedLimits.maxPrimary} 个主标签。`,
+    }
+  }
+  if (secondaryCount < normalizedLimits.minSecondary) {
+    return {
+      code: 'min_secondary',
+      message: `当前至少需要选择 ${normalizedLimits.minSecondary} 个次标签。`,
+    }
+  }
+  if (secondaryCount > normalizedLimits.maxSecondary) {
+    return {
+      code: 'max_secondary',
+      message: `当前最多只能选择 ${normalizedLimits.maxSecondary} 个次标签。`,
+    }
+  }
+  if (primaryCount + secondaryCount <= 0) {
+    return {
+      code: 'empty',
+      message: '请选择标签后再发布讨论。',
+    }
+  }
+
+  return null
 }
 
 export function resolveRequestedSelection(tagId, tags = []) {

@@ -25,6 +25,7 @@ import {
 } from './tagUtils.js'
 import {
   normalizeSelectionIds,
+  resolveTagSelectionRequirement,
 } from './tagSelectionState.js'
 
 export const extend = [
@@ -699,12 +700,12 @@ function registerTagsForum(forum) {
     order: 40,
     isVisible: context => {
       const state = getTagsComposerState(context)
-      return context.type === 'discussion' && Number(state.availableTagCount ?? state.availablePrimaryTagCount ?? 0) > 0 && Number(state.selectedTagCount || 0) <= 0
+      return context.type === 'discussion' && !state.loadingTags && Boolean(resolveComposerTagRequirement(state))
     },
-    resolve: () => ({
+    resolve: context => ({
       label: '标签',
       tone: 'info',
-      message: '先选择标签，再发布讨论。',
+      message: resolveComposerTagRequirement(getTagsComposerState(context))?.message || '先选择标签，再发布讨论。',
     }),
   })
 
@@ -729,11 +730,11 @@ function registerTagsForum(forum) {
         }
       }
 
-      if (Number(state.selectedTagCount || 0) > 0) return null
-      return {
+      const requirement = resolveComposerTagRequirement(state)
+      return requirement ? {
         tone: 'error',
-        message: '请选择标签后再发布讨论。',
-      }
+        message: requirement.message,
+      } : null
     },
   })
 
@@ -761,6 +762,22 @@ function normalizeTaggedDiscussion(discussion = {}) {
 
 function getTagsComposerState(context = {}) {
   return context.extensionState?.tags || {}
+}
+
+function resolveComposerTagRequirement(state = {}) {
+  if (state.tagSelectionRequirement) return state.tagSelectionRequirement
+  return resolveTagSelectionRequirement({
+    availableTagCount: state.availableTagCount ?? state.availablePrimaryTagCount ?? 0,
+    bypassTagCounts: state.canBypassTagCounts ?? state.can_bypass_tag_counts,
+    limits: {
+      minPrimary: state.minPrimaryTagCount,
+      maxPrimary: state.maxPrimaryTagCount,
+      minSecondary: state.minSecondaryTagCount,
+      maxSecondary: state.maxSecondaryTagCount,
+    },
+    selectedPrimaryCount: state.selectedPrimaryTagCount,
+    selectedSecondaryCount: state.selectedSecondaryTagCount,
+  })
 }
 
 function buildTagsSidebarContextData({

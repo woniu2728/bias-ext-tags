@@ -140,9 +140,9 @@ const selectionState = computed(() => createTagSelectionState({
   settings: forumStore.settings || {},
 }))
 const primaryTags = computed(() => selectionState.value.primaryTags)
-const rootSecondaryTags = computed(() => selectionState.value.rootSecondaryTags)
 const secondaryTagOptions = computed(() => selectionState.value.secondaryOptions)
 const selectedTagIds = computed(() => selectionState.value.selectedTagIds)
+const tagSelectionRequirement = computed(() => selectionState.value.requirement)
 const primarySelectSize = computed(() => tagLimits.value.maxPrimary > 1 ? Math.min(Math.max(primaryTags.value.length + 1, 3), 8) : undefined)
 const secondarySelectSize = computed(() => tagLimits.value.maxSecondary > 1 ? Math.min(Math.max(secondaryTagOptions.value.length + 1, 3), 8) : undefined)
 const hasChanged = computed(() => {
@@ -156,7 +156,7 @@ const hasChanged = computed(() => {
 const canSubmit = computed(() => {
   return Boolean(
     props.discussion?.id
-    && selectedTagIds.value.length
+    && !tagSelectionRequirement.value
     && !loading.value
     && !submitting.value
     && hasChanged.value
@@ -181,7 +181,7 @@ const secondaryPlaceholderText = computed(() => getUiCopy({
 })?.text || (secondaryTagOptions.value.length ? '不选择次标签' : '无可用次标签'))
 const secondaryHelpText = computed(() => getUiCopy({
   surface: 'tag-discussion-secondary-help',
-})?.text || '次标签必须隶属于当前主标签。')
+})?.text || tagSelectionRequirement.value?.message || '次标签必须隶属于当前主标签。')
 const cancelButtonText = computed(() => getUiCopy({ surface: 'modal-cancel-button' })?.text || '取消')
 const submitButtonText = computed(() => getUiCopy({
   surface: 'tag-discussion-submit-button',
