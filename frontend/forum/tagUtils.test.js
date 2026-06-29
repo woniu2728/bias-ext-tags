@@ -7,6 +7,7 @@ import {
   isPrimaryRootTag,
   isSecondaryRootTag,
   normalizeTag,
+  sortTags,
   sortTagsByStructure,
 } from './tagUtils.js'
 
@@ -22,14 +23,28 @@ test('tag structure helpers follow stored primary state', () => {
   assert.equal(isSecondaryRootTag(child), false)
 })
 
-test('tag structure sorting keeps positioned tags before nullable tags', () => {
+test('tag structure sorting follows primary, child and secondary ordering', () => {
+  const parent = { id: 1, name: '主一', is_primary: true, position: 1, parent_id: null }
   const tags = [
-    { name: '次级', position: null },
-    { name: '主二', position: 2 },
-    { name: '主一', position: 1 },
+    { id: 4, name: '低热度次级', is_primary: false, position: null, discussion_count: 1 },
+    { id: 3, name: '子一', is_primary: true, position: 0, parent_id: 1, parent },
+    { id: 2, name: '主二', is_primary: true, position: 2, parent_id: null },
+    { id: 5, name: '高热度次级', is_primary: false, position: null, discussion_count: 9 },
+    parent,
   ].sort(sortTagsByStructure)
 
-  assert.deepEqual(tags.map(tag => tag.name), ['主一', '主二', '次级'])
+  assert.deepEqual(tags.map(tag => tag.name), ['主一', '子一', '主二', '高热度次级', '低热度次级'])
+})
+
+test('sort tags derives parent ordering from the same tag payload', () => {
+  const tags = sortTags([
+    { id: 20, name: '子二', is_primary: true, parent_id: 2, position: 0 },
+    { id: 2, name: '主二', is_primary: true, parent_id: null, position: 2 },
+    { id: 10, name: '子一', is_primary: true, parent_id: 1, position: 0 },
+    { id: 1, name: '主一', is_primary: true, parent_id: null, position: 1 },
+  ])
+
+  assert.deepEqual(tags.map(tag => tag.id), [1, 10, 2, 20])
 })
 
 test('tag structure grouping separates primary, secondary roots and children', () => {
@@ -43,7 +58,7 @@ test('tag structure grouping separates primary, secondary roots and children', (
 
   assert.deepEqual(grouped.primaryTags.map(tag => tag.id), [2, 1])
   assert.deepEqual(grouped.primaryTags[0].children.map(tag => tag.id), [3])
-  assert.deepEqual(grouped.secondaryTags.map(tag => tag.id), [5, 4])
+  assert.deepEqual(grouped.secondaryTags.map(tag => tag.id), [4, 5])
   assert.deepEqual(grouped.childTags.map(tag => tag.id), [3])
 })
 

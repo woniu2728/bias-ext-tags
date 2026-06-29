@@ -34,6 +34,14 @@ test('tags sidebar navigation derives context ordering and active parent tags', 
       discussion_count: 9,
       children: [],
     },
+    {
+      id: 4,
+      slug: 'secondary-low',
+      is_primary: false,
+      position: null,
+      discussion_count: 1,
+      children: [],
+    },
   ]
 
   const contextParent = findDiscussionListSidebarContextParent('child', normalizedTags)
@@ -44,7 +52,7 @@ test('tags sidebar navigation derives context ordering and active parent tags', 
   )
   assert.deepEqual(
     buildDiscussionListSecondaryTagItems(normalizedTags).map(tag => tag.slug),
-    ['secondary']
+    ['secondary', 'secondary-low']
   )
   assert.equal(isDiscussionSidebarTagActive({
     currentTag: { parent_id: 1 },

@@ -1,7 +1,7 @@
 <template>
   <div class="discussion-tag-labels">
     <TagBadge
-      v-for="tag in tags"
+      v-for="tag in sortedTags"
       :key="tag.id"
       :tag="tag"
       :size="size"
@@ -11,13 +11,17 @@
 </template>
 
 <script setup>
+import { computed } from '@bias/core'
 import TagBadge from './TagBadge.vue'
+import { sortTags } from './tagUtils.js'
 
-defineProps({
+const props = defineProps({
   tags: { type: Array, default: () => [] },
   size: { type: String, default: 'sm' },
   maxWidth: { type: String, default: '160px' },
 })
+
+const sortedTags = computed(() => sortTags(props.tags))
 </script>
 
 <style scoped>

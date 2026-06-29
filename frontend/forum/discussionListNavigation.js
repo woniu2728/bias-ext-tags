@@ -1,46 +1,7 @@
-import { isChildTag, isPrimaryRootTag, isSecondaryRootTag } from './tagUtils.js'
-
-export function normalizeDiscussionTagPosition(position) {
-  return position === null || position === undefined ? null : Number(position)
-}
+import { isChildTag, isPrimaryRootTag, isSecondaryRootTag, sortTags } from './tagUtils.js'
 
 export function sortDiscussionListSidebarTags(normalizedTags = []) {
-  const tagsById = new Map(normalizedTags.map(tag => [tag.id, tag]))
-
-  return normalizedTags.slice().sort((left, right) => {
-    const leftPosition = normalizeDiscussionTagPosition(left.position)
-    const rightPosition = normalizeDiscussionTagPosition(right.position)
-
-    if (leftPosition === null && rightPosition === null) {
-      return Number(right.discussion_count || 0) - Number(left.discussion_count || 0)
-    }
-
-    if (rightPosition === null) return -1
-    if (leftPosition === null) return 1
-
-    const leftParent = left.parent_id ? tagsById.get(left.parent_id) : null
-    const rightParent = right.parent_id ? tagsById.get(right.parent_id) : null
-
-    if (leftParent?.id === rightParent?.id) return leftPosition - rightPosition
-
-    if (leftParent && rightParent) {
-      return normalizeDiscussionTagPosition(leftParent.position) - normalizeDiscussionTagPosition(rightParent.position)
-    }
-
-    if (leftParent) {
-      return leftParent.id === right.id
-        ? 1
-        : normalizeDiscussionTagPosition(leftParent.position) - rightPosition
-    }
-
-    if (rightParent) {
-      return rightParent.id === left.id
-        ? -1
-        : leftPosition - normalizeDiscussionTagPosition(rightParent.position)
-    }
-
-    return 0
-  })
+  return sortTags(normalizedTags)
 }
 
 export function findDiscussionListSidebarContextParent(targetSlug, normalizedTags = []) {
