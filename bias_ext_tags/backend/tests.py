@@ -1469,6 +1469,29 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         tag = Tag.objects.get(id=payload["id"])
         self.assertFalse(tag.is_primary)
 
+    def test_creating_child_under_secondary_root_is_rejected(self):
+        secondary = Tag.objects.create(
+            name="API 次级父级",
+            slug="api-secondary-parent",
+            position=None,
+            is_primary=False,
+        )
+
+        response = self.client.post(
+            "/api/tags",
+            data=json.dumps({
+                "name": "错误子标签",
+                "slug": "invalid-secondary-child",
+                "parent_id": secondary.id,
+            }),
+            content_type="application/json",
+            **self.auth_header(self.admin),
+        )
+
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn("主标签", response.json()["error"])
+        self.assertFalse(Tag.objects.filter(slug="invalid-secondary-child").exists())
+
     def test_tag_detail_exposes_registered_resource_fields(self):
         with self.captureOnCommitCallbacks(execute=True):
             discussion = create_runtime_discussion(
@@ -3918,6 +3941,28 @@ class AdminTagManagementApiTests(TestCase):
         self.assertEqual(response.status_code, 400, response.content)
         self.assertIn("顶级标签", response.json()["error"])
 
+    def test_admin_cannot_create_child_under_secondary_root(self):
+        secondary = Tag.objects.create(
+            name="次级父级",
+            slug="secondary-parent",
+            position=None,
+            is_primary=False,
+        )
+
+        response = self.client.post(
+            "/api/admin/tags",
+            data=json.dumps({
+                "name": "错误子级",
+                "slug": "invalid-admin-secondary-child",
+                "parent_id": secondary.id,
+            }),
+            content_type="application/json",
+            **self.auth_header(),
+        )
+
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn("主标签", response.json()["error"])
+
     def test_admin_cannot_turn_parent_tag_with_children_into_child(self):
         response = self.client.put(
             f"/api/admin/tags/{self.parent_tag.id}",
@@ -4089,6 +4134,32 @@ class AdminTagManagementApiTests(TestCase):
 
         self.assertEqual(response.status_code, 400, response.content)
         self.assertIn("重复标签", response.json()["error"])
+
+    def test_admin_order_tags_rejects_secondary_root_as_parent(self):
+        secondary = Tag.objects.create(
+            name="次级排序父级",
+            slug="secondary-order-parent",
+            position=None,
+            is_primary=False,
+        )
+
+        response = self.client.post(
+            "/api/admin/tags/order",
+            data=json.dumps({
+                "order": [
+                    {"id": secondary.id, "children": [self.child_tag.id]},
+                ],
+            }),
+            content_type="application/json",
+            **self.auth_header(),
+        )
+
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn("主标签", response.json()["error"])
+        secondary.refresh_from_db()
+        self.child_tag.refresh_from_db()
+        self.assertFalse(secondary.is_primary)
+        self.assertEqual(self.child_tag.parent_id, self.parent_tag.id)
 
     def test_member_cannot_order_tags(self):
         response = self.client.post(

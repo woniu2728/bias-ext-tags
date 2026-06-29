@@ -673,6 +673,9 @@ class TagService:
         if parent.parent_id is not None:
             raise ValueError("只能选择顶级标签作为父标签")
 
+        if not TagService.is_primary_root_tag(parent):
+            raise ValueError("只能选择主标签作为父标签")
+
         if tag is not None:
             if tag.id == parent.id:
                 raise ValueError("标签不能设置自己为父标签")
