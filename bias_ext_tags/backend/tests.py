@@ -627,6 +627,46 @@ class TagsExtensionRuntimeTests(ExtensionRuntimeTestMixin, TestCase):
         tag = TagService.create_tag(name="授权创建", slug="service-allowed", user=member)
         self.assertEqual(tag.slug, "service-allowed")
 
+    def test_restricted_tag_permission_scope_caches_runtime_permission_snapshot(self):
+        self.bootstrap_extensions("tags")
+        member = User.objects.create_user(
+            username="tag-scope-cache-member",
+            email="tag-scope-cache-member@example.com",
+            password="password123",
+            is_email_confirmed=True,
+        )
+        first_tag = Tag.objects.create(name="Scope Cache One", slug="scope-cache-one", is_restricted=True)
+        second_tag = Tag.objects.create(name="Scope Cache Two", slug="scope-cache-two", is_restricted=True)
+
+        permissions = [f"tag{first_tag.id}.viewForum"]
+
+        def runtime_permissions(_user):
+            return tuple(permissions)
+
+        with patch("bias_ext_tags.backend.services._get_runtime_forum_permissions", side_effect=runtime_permissions) as get_permissions:
+            self.assertEqual(
+                TagService._restricted_tag_ids_with_permission(member, "viewForum"),
+                (first_tag.id,),
+            )
+            self.assertEqual(len(member._tag_restricted_permission_ids_cache), 1)
+            self.assertEqual(
+                TagService._restricted_tag_ids_with_permission(member, "viewForum"),
+                (first_tag.id,),
+            )
+            self.assertEqual(len(member._tag_restricted_permission_ids_cache), 1)
+            permissions.append(f"tag{second_tag.id}.viewForum")
+            self.assertEqual(
+                TagService._restricted_tag_ids_with_permission(member, "viewForum"),
+                (first_tag.id, second_tag.id),
+            )
+            self.assertEqual(len(member._tag_restricted_permission_ids_cache), 2)
+
+        self.assertEqual(
+            get_permissions.call_count,
+            3,
+            "Permission snapshots should be fetched once per call, but tag-id parsing should reuse matching snapshots.",
+        )
+
     def test_tags_posts_integration_is_optional(self):
         self.disable_extension_for_test("posts")
         application = self.bootstrap_extensions("tags")

@@ -590,9 +590,21 @@ class TagService:
         if getattr(user, "is_superuser", False):
             return tuple(Tag.objects.filter(is_restricted=True).values_list("id", flat=True))
 
+        permissions = tuple(sorted(str(permission or "").strip() for permission in _get_runtime_forum_permissions(user)))
+        cache_key = (ability, permissions)
+        cache = getattr(user, "_tag_restricted_permission_ids_cache", None)
+        if cache is None:
+            cache = {}
+            try:
+                setattr(user, "_tag_restricted_permission_ids_cache", cache)
+            except Exception:
+                cache = {}
+        if cache_key in cache:
+            return cache[cache_key]
+
         suffix = f".{ability}"
         tag_ids: list[int] = []
-        for permission in _get_runtime_forum_permissions(user):
+        for permission in permissions:
             if not permission.startswith("tag") or not permission.endswith(suffix):
                 continue
             raw_tag_id = permission[3:-len(suffix)]
@@ -602,7 +614,9 @@ class TagService:
                 continue
             if tag_id > 0:
                 tag_ids.append(tag_id)
-        return tuple(sorted(set(tag_ids)))
+        resolved = tuple(sorted(set(tag_ids)))
+        cache[cache_key] = resolved
+        return resolved
 
     @staticmethod
     def validate_tag_selection(tag_ids: Optional[List[int]]) -> List[int]:
