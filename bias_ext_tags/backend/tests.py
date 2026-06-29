@@ -2716,6 +2716,47 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         self.assertTrue(response.json()["mutated_by_resource_endpoint"])
 
+    def test_tag_slug_detail_static_route_uses_resource_endpoint_mutator(self):
+        def mutate_endpoint(endpoint):
+            def response_callback(context, response):
+                callback = endpoint.response_callback
+                payload = callback(context, response) if callback is not None else response
+                payload["mutated_by_resource_endpoint"] = True
+                return payload
+
+            return ResourceEndpointDefinition(
+                resource=endpoint.resource,
+                endpoint=endpoint.endpoint,
+                module_id="test",
+                handler=endpoint.handler,
+                kind=endpoint.kind,
+                ability=endpoint.ability,
+                methods=endpoint.methods,
+                response_callback=response_callback,
+            )
+
+        registry = ResourceRegistry()
+        registry.register_resource(TagResource())
+        registry.register_endpoint(
+            ResourceEndpointDefinition(
+                resource="tag",
+                endpoint="show-by-slug",
+                module_id="test",
+                operation="mutate",
+                mutator=mutate_endpoint,
+            )
+        )
+
+        with patch("bias_ext_tags.backend.handlers.get_runtime_resource_registry", return_value=registry):
+            with patch("bias_core.resource_dispatcher.get_runtime_resource_registry", return_value=registry):
+                response = self.client.get(
+                    f"/api/tags/slug/{self.members_tag.slug}",
+                    **self.auth_header(self.admin),
+                )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(response.json()["mutated_by_resource_endpoint"])
+
     def test_runtime_registry_registers_tag_as_database_resource_object(self):
         registry = get_resource_registry()
         resource_object = registry.get_resource_object("tag")
@@ -2749,6 +2790,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
 
         self.assertIn(("index", "/tags", False), routes)
         self.assertIn(("show", "/tags/{object_id}", False), routes)
+        self.assertIn(("show-by-slug", "/tags/slug/{object_id}", False), routes)
         self.assertIn(("create", "/tags", False), routes)
         self.assertIn(("update", "/tags/{object_id}", False), routes)
         self.assertIn(("delete", "/tags/{object_id}", False), routes)
@@ -2758,6 +2800,8 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         }
         self.assertEqual(endpoints["create"].kind, "create")
         self.assertEqual(endpoints["index"].kind, "index")
+        self.assertEqual(endpoints["show-by-slug"].kind, "show")
+        self.assertEqual(endpoints["show-by-slug"].ability, "view")
         self.assertEqual(endpoints["update"].kind, "update")
 
     def test_tag_resource_object_owns_flarum_writable_field_contract(self):

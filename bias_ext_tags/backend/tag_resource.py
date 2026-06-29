@@ -8,7 +8,6 @@ from bias_ext_tags.backend.models import Tag
 def tag_endpoint_specs() -> tuple[dict, ...]:
     from bias_ext_tags.backend.handlers import (
         dispatch_tag_popular,
-        dispatch_tag_show_by_slug,
     )
     from bias_ext_tags.backend.handlers import (
         core_delete_tag_response,
@@ -57,10 +56,12 @@ def tag_endpoint_specs() -> tuple[dict, ...]:
         },
         {
             "name": "show-by-slug",
-            "handler": dispatch_tag_show_by_slug,
             "methods": ("GET",),
             "path": "/tags/slug/{object_id}",
             "absolute_path": True,
+            "ability": "view",
+            "kind": "show",
+            "response_callback": core_show_tag_response,
         },
         {
             "name": "update",
@@ -296,7 +297,7 @@ class TagResource(DatabaseResource):
 
         normalized = str(object_id or "").strip()
         if normalized.isdigit():
-            tag = self.query(context).filter(id=int(normalized)).first()
+            tag = Tag.objects.select_related("last_posted_discussion", "parent").filter(id=int(normalized)).first()
             if tag is not None:
                 return tag
 
