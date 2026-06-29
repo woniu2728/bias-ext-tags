@@ -1672,6 +1672,50 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(allowed_response.status_code, 200, allowed_response.content)
         self.assertIn(restricted_tag.slug, {tag["slug"] for tag in allowed_response.json()["data"]})
 
+    def test_add_to_discussion_tag_list_keeps_current_tags_without_add_permission(self):
+        current_tag = Tag.objects.create(
+            name="当前受限标签",
+            slug="current-restricted-edit-tag",
+            is_restricted=True,
+            view_scope=Tag.ACCESS_PUBLIC,
+            start_discussion_scope=Tag.ACCESS_MEMBERS,
+            reply_scope=Tag.ACCESS_MEMBERS,
+        )
+        unavailable_tag = Tag.objects.create(
+            name="其他受限标签",
+            slug="other-restricted-edit-tag",
+            is_restricted=True,
+            view_scope=Tag.ACCESS_PUBLIC,
+            start_discussion_scope=Tag.ACCESS_MEMBERS,
+            reply_scope=Tag.ACCESS_MEMBERS,
+        )
+        member_group = Group.objects.create(name="RestrictedEditPicker", color="#4d698e")
+        Permission.objects.create(group=member_group, permission=f"tag{current_tag.id}.viewForum")
+        Permission.objects.create(group=member_group, permission=f"tag{unavailable_tag.id}.viewForum")
+        Permission.objects.create(group=member_group, permission="startDiscussion")
+        self.member.user_groups.add(member_group)
+        discussion = create_runtime_discussion(
+            title="保留当前标签",
+            content="编辑标签时保留已有标签",
+            user=self.admin,
+            extension_payload=discussion_tags_payload([current_tag.id]),
+        )
+
+        response = self.client.get(
+            "/api/tags",
+            {
+                "purpose": "add_to_discussion",
+                "discussion_id": discussion.id,
+                "include_children": True,
+            },
+            **self.auth_header(self.member),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        slugs = {tag["slug"] for tag in response.json()["data"]}
+        self.assertIn(current_tag.slug, slugs)
+        self.assertNotIn(unavailable_tag.slug, slugs)
+
     def test_tag_detail_supports_resource_field_selection(self):
         create_runtime_discussion(
             title="标签字段裁剪",

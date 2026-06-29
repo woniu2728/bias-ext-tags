@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from django.core.exceptions import PermissionDenied
 from django.db.models import Prefetch
+from django.db.models import Q
 
 from bias_core.extensions.platform import api_error
 from bias_core.extensions.runtime import get_runtime_resource_registry
@@ -132,7 +133,7 @@ def _tag_bool_query_value(context, key: str, default=False):
 
 def _tag_purpose_query_value(context):
     purpose = str(_tag_query_value(context, "purpose", "view") or "view")
-    if purpose not in {"view", "start_discussion", "reply"}:
+    if purpose not in {"view", "start_discussion", "add_to_discussion", "reply"}:
         return "view"
     return purpose
 
@@ -171,6 +172,7 @@ def dispatch_tag_index(context):
     include_hidden = _tag_bool_query_value(context, "include_hidden", False)
     include_children = _tag_bool_query_value(context, "include_children", True)
     purpose = _tag_purpose_query_value(context)
+    discussion_tag_ids = _tag_current_discussion_tag_ids(context) if purpose == "add_to_discussion" else ()
     if include_hidden and (not user or not user.is_staff):
         include_hidden = False
 
@@ -178,6 +180,8 @@ def dispatch_tag_index(context):
     if not include_hidden:
         visible_child_queryset = visible_child_queryset.filter(is_hidden=False)
     visible_child_queryset = TagService.filter_tags_for_user(visible_child_queryset, user, action=purpose)
+    if discussion_tag_ids:
+        visible_child_queryset = visible_child_queryset | Tag.objects.filter(id__in=discussion_tag_ids)
 
     queryset = Tag.objects.select_related("last_posted_discussion").prefetch_related(
         Prefetch("children", queryset=visible_child_queryset, to_attr="visible_children")
@@ -199,7 +203,11 @@ def dispatch_tag_index(context):
         queryset = queryset.filter(is_hidden=False)
 
     queryset = TagService.filter_tags_for_user(queryset, user, action=purpose)
-    tags = queryset.order_by(*TagService.structure_order_by())
+    if discussion_tag_ids:
+        queryset = queryset | Tag.objects.filter(
+            Q(id__in=discussion_tag_ids) | Q(children__id__in=discussion_tag_ids)
+        )
+    tags = queryset.distinct().order_by(*TagService.structure_order_by())
 
     serialize_context = _build_tag_serialize_context(user, action=purpose)
     return {
@@ -215,6 +223,22 @@ def dispatch_tag_index(context):
             for tag in tags
         ]
     }
+
+
+def _tag_current_discussion_tag_ids(context) -> tuple[int, ...]:
+    discussion_id = _tag_int_query_value(context, "discussion_id")
+    if not discussion_id:
+        return ()
+    user = context.get("user")
+    visible_current_tags = TagService.filter_tags_for_user(
+        Tag.objects.filter(discussion_tags__discussion_id=discussion_id),
+        user,
+        action="view",
+    )
+    return tuple(
+        visible_current_tags.order_by("id")
+        .values_list("id", flat=True)
+    )
 
 
 def dispatch_tag_popular(context):

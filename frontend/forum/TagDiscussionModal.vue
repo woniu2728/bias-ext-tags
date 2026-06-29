@@ -200,8 +200,9 @@ async function loadTags() {
   try {
     const response = await api.get('/tags', {
       params: {
+        discussion_id: props.discussion?.id,
         include_children: true,
-        purpose: 'start_discussion',
+        purpose: 'add_to_discussion',
       },
     })
     tags.value = unwrapTagList(response).map(normalizeTag)

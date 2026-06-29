@@ -32,11 +32,13 @@ class TagService:
     ACTION_SCOPE_FIELD = {
         "view": "view_scope",
         "start_discussion": "start_discussion_scope",
+        "add_to_discussion": "start_discussion_scope",
         "reply": "reply_scope",
     }
     ACTION_RESTRICTED_PERMISSION = {
         "view": "viewForum",
         "start_discussion": "startDiscussion",
+        "add_to_discussion": "startDiscussion",
         "reply": "discussion.reply",
     }
     TAG_ABILITY_PERMISSION = {
