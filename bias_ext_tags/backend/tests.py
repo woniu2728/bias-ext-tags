@@ -1405,6 +1405,34 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertNotIn("reply_scope", payload)
         self.assertNotIn("stored_slug", payload)
 
+    def test_tag_editor_payload_includes_stored_slug_without_admin_only_access_fields(self):
+        tag = Tag.objects.create(
+            name="编辑者可见",
+            slug="editor-visible",
+            is_restricted=False,
+            view_scope=Tag.ACCESS_PUBLIC,
+            start_discussion_scope=Tag.ACCESS_MEMBERS,
+            reply_scope=Tag.ACCESS_STAFF,
+        )
+        group = Group.objects.create(name="TagEditorStoredSlug", color="#4d698e")
+        Permission.objects.create(group=group, permission="tag.edit")
+        self.member.user_groups.add(group)
+        if hasattr(self.member, "_forum_permission_cache"):
+            delattr(self.member, "_forum_permission_cache")
+
+        response = self.client.get(
+            f"/api/tags/{tag.id}",
+            **self.auth_header(self.member),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertEqual(payload["stored_slug"], "editor-visible")
+        self.assertNotIn("is_restricted", payload)
+        self.assertNotIn("view_scope", payload)
+        self.assertNotIn("start_discussion_scope", payload)
+        self.assertNotIn("reply_scope", payload)
+
     def test_admin_tag_payload_includes_access_fields(self):
         tag = Tag.objects.create(
             name="后台可见",
