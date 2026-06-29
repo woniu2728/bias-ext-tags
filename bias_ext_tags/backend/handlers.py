@@ -3,8 +3,12 @@ from __future__ import annotations
 from django.core.exceptions import PermissionDenied
 from django.db.models import Prefetch
 from django.db.models import Q
+from django.http import HttpResponse
+from ninja import Body
 
 from bias_core.extensions.platform import api_error
+from bias_core.extensions.platform import require_staff
+from bias_core.extensions.platform import resolve_authenticated_user
 from bias_core.extensions.runtime import get_runtime_resource_registry
 from bias_core.extensions.platform import ResourceQueryOptions, parse_resource_query_options
 from bias_core.extensions.platform import merge_resource_includes
@@ -383,6 +387,26 @@ def dispatch_tag_delete(context):
         return {"message": "标签已删除"}
     except Tag.DoesNotExist:
         return api_error("标签不存在", status=404)
+    except PermissionDenied as e:
+        return api_error(str(e), status=403)
+    except ValueError as e:
+        return api_error(str(e), status=400)
+
+
+def order_tags_api_route(request, payload: dict = Body(...)):
+    user = resolve_authenticated_user(request)
+    if user is not None and getattr(user, "is_authenticated", False):
+        request.auth = user
+
+    denied = require_staff(request)
+    if denied:
+        return denied
+    if not isinstance(payload, dict) or "order" not in payload:
+        return HttpResponse(status=422)
+
+    try:
+        TagService.order_tags(payload.get("order"), request.auth)
+        return HttpResponse(status=204)
     except PermissionDenied as e:
         return api_error(str(e), status=403)
     except ValueError as e:

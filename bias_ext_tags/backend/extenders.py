@@ -16,6 +16,7 @@ from bias_core.extensions import (
     PostLifecycleExtender,
     PostEventExtender,
     RealtimeExtender,
+    RoutesExtender,
     SearchDriverExtender,
     ServiceProviderExtender,
     SettingsExtender,
@@ -76,6 +77,7 @@ from bias_ext_tags.backend.resources import (
     tag_resource_field_definitions,
     tag_resource_relationship_definitions,
 )
+from bias_ext_tags.backend.handlers import order_tags_api_route
 from bias_ext_tags.backend.runtime import tag_service_provider
 from bias_ext_tags.backend.runtime_models import DISCUSSION_MODEL, POST_MODEL
 from bias_ext_tags.backend.services import TagService
@@ -109,6 +111,7 @@ def admin_extenders():
             mounts=(("/admin", admin_tags_router),),
             tags=("Admin",),
         ),
+        RoutesExtender(tags=("Tags",)).post("/tags/order", "tags.order", order_tags_api_route),
         SettingsExtender(
             fields=setting_field_definitions(),
             expose_to_forum=(

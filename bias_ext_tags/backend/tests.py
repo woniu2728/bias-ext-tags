@@ -5346,6 +5346,53 @@ class AdminTagManagementApiTests(TestCase):
 
         self.assertEqual(response.status_code, 403, response.content)
 
+    def test_flarum_compatible_order_tags_route_returns_no_content(self):
+        response = self.client.post(
+            "/api/tags/order",
+            data=json.dumps({
+                "order": [
+                    {"id": self.other_root_tag.id, "children": []},
+                    {"id": self.parent_tag.id, "children": [self.child_tag.id]},
+                ],
+            }),
+            content_type="application/json",
+            **self.auth_header(),
+        )
+
+        self.assertEqual(response.status_code, 204, response.content)
+        self.assertEqual(response.content, b"")
+
+        self.other_root_tag.refresh_from_db()
+        self.parent_tag.refresh_from_db()
+        self.child_tag.refresh_from_db()
+
+        self.assertEqual(self.other_root_tag.position, 0)
+        self.assertIsNone(self.other_root_tag.parent_id)
+        self.assertEqual(self.parent_tag.position, 1)
+        self.assertIsNone(self.parent_tag.parent_id)
+        self.assertEqual(self.child_tag.parent_id, self.parent_tag.id)
+        self.assertEqual(self.child_tag.position, 0)
+
+    def test_flarum_compatible_order_tags_route_requires_admin(self):
+        response = self.client.post(
+            "/api/tags/order",
+            data=json.dumps({"order": [{"id": self.parent_tag.id, "children": []}]}),
+            content_type="application/json",
+            **self.auth_header_for(self.member),
+        )
+
+        self.assertEqual(response.status_code, 403, response.content)
+
+    def test_flarum_compatible_order_tags_route_rejects_missing_order(self):
+        response = self.client.post(
+            "/api/tags/order",
+            data=json.dumps({}),
+            content_type="application/json",
+            **self.auth_header(),
+        )
+
+        self.assertEqual(response.status_code, 422, response.content)
+
     @patch("bias_ext_tags.backend.admin_api.dispatch_runtime_tag_stats_refresh")
     def test_admin_can_refresh_tag_stats(self, dispatch_runtime_tag_stats_refresh):
         dispatch_runtime_tag_stats_refresh.return_value = {
