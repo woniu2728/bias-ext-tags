@@ -554,11 +554,30 @@ const filteredIconOptions = computed(() => {
 const primaryTags = computed(() => tags.value.filter(isPrimaryRootTag))
 const secondaryRootTags = computed(() => tags.value.filter(isSecondaryRootTag))
 const childTags = computed(() => tags.value.filter(isChildTag))
-const tagTree = computed(() => buildTagTree(tags.value))
-const tagRows = computed(() => flattenTagTree(tagTree.value))
-const primaryTagRows = computed(() => tagRows.value.filter(row => row.depth === 0 && isPrimaryRootTag(row.tag)))
-const secondaryRootRows = computed(() => secondaryRootTags.value.slice().sort(sortTagNodesFlat).map(tag => ({ tag, depth: 0, parentName: null })))
-const childTagRows = computed(() => tagRows.value.filter(row => row.depth > 0))
+const childTagsByParentId = computed(() => {
+  const grouped = new Map()
+  for (const tag of childTags.value) {
+    const parentId = Number(tag.parent_id)
+    if (!grouped.has(parentId)) grouped.set(parentId, [])
+    grouped.get(parentId).push(tag)
+  }
+
+  for (const siblings of grouped.values()) {
+    siblings.sort(sortTagNodesFlat)
+  }
+
+  return grouped
+})
+const primaryTagRows = computed(() => primaryTags.value.slice().sort(sortTagNodesFlat).map(tag => makeTagRow(tag, 0)))
+const secondaryRootRows = computed(() => secondaryRootTags.value.slice().sort(sortTagNodesFlat).map(tag => makeTagRow(tag, 0)))
+const childTagRows = computed(() => {
+  const rows = []
+  for (const parentRow of primaryTagRows.value) {
+    const children = childTagsByParentId.value.get(Number(parentRow.tag.id)) || []
+    rows.push(...children.map(child => makeTagRow(child, 1, parentRow.tag.name)))
+  }
+  return rows
+})
 const tagSummary = computed(() => ({
   total: tags.value.length,
   root: primaryTags.value.length,
@@ -579,10 +598,9 @@ const editingTagHasChildren = computed(() => {
 })
 const availableParentOptions = computed(() => {
   const editingId = editingTag.value?.id || null
-  const blockedIds = editingId ? new Set([editingId, ...collectDescendantIds(tags.value, editingId)]) : new Set()
 
-  return tagRows.value
-    .filter(row => row.depth === 0 && isPrimaryRootTag(row.tag) && !blockedIds.has(row.tag.id))
+  return primaryTagRows.value
+    .filter(row => row.tag.id !== editingId)
     .map(row => ({
       id: row.tag.id,
       label: row.tag.name
@@ -916,31 +934,27 @@ function getTagBadgeStyle(tag) {
   }
 }
 
-function buildTagTree(sourceTags) {
-  const records = sourceTags.filter(tag => !isSecondaryRootTag(tag)).map(tag => ({
-    ...tag,
-    children: [],
-  }))
-  const byId = new Map(records.map(tag => [tag.id, tag]))
-  const roots = []
+function buildTagOrderPayload(sourceTags) {
+  const primaryRoots = sourceTags
+    .filter(isPrimaryRootTag)
+    .slice()
+    .sort(sortTagNodesFlat)
+  const childGroups = new Map()
 
-  for (const tag of records) {
-    const parent = tag.parent_id ? byId.get(tag.parent_id) : null
-    if (parent) {
-      parent.children.push(tag)
-    } else {
-      roots.push(tag)
-    }
+  for (const tag of sourceTags) {
+    if (!isChildTag(tag)) continue
+    const parentId = Number(tag.parent_id)
+    if (!childGroups.has(parentId)) childGroups.set(parentId, [])
+    childGroups.get(parentId).push(tag)
   }
 
-  sortTagNodes(roots)
-  return roots
-}
+  for (const children of childGroups.values()) {
+    children.sort(sortTagNodesFlat)
+  }
 
-function buildTagOrderPayload(sourceTags) {
-  return buildTagTree(sourceTags).map(parent => ({
+  return primaryRoots.map(parent => ({
     id: parent.id,
-    children: parent.children.map(child => child.id),
+    children: (childGroups.get(Number(parent.id)) || []).map(child => child.id),
   }))
 }
 
@@ -970,14 +984,6 @@ function normalizeTagListResponse(response, fallback = []) {
   return fallback
 }
 
-function sortTagNodes(nodes) {
-  nodes.sort(sortTagNodesFlat)
-
-  for (const node of nodes) {
-    sortTagNodes(node.children)
-  }
-}
-
 function sortTagNodesFlat(left, right) {
   const leftPosition = Number(left.position ?? Number.MAX_SAFE_INTEGER)
   const rightPosition = Number(right.position ?? Number.MAX_SAFE_INTEGER)
@@ -985,23 +991,18 @@ function sortTagNodesFlat(left, right) {
   return String(left.name || '').localeCompare(String(right.name || ''), 'zh-CN')
 }
 
-function flattenTagTree(nodes, depth = 0, parentName = null) {
-  return nodes.flatMap(node => [
-    { tag: node, depth, parentName },
-    ...flattenTagTree(node.children, depth + 1, node.name)
-  ])
-}
-
-function collectDescendantIds(sourceTags, tagId) {
-  const children = sourceTags.filter(tag => tag.parent_id === tagId)
-  return children.flatMap(child => [child.id, ...collectDescendantIds(sourceTags, child.id)])
+function makeTagRow(tag, depth = 0, parentName = null) {
+  return { tag, depth, parentName }
 }
 
 function getSiblingRows(tag) {
   if (isSecondaryRootTag(tag)) {
     return secondaryRootRows.value
   }
-  return tagRows.value.filter(row => (row.tag.parent_id ?? null) === (tag.parent_id ?? null))
+  if (isChildTag(tag)) {
+    return childTagRows.value.filter(row => Number(row.tag.parent_id) === Number(tag.parent_id))
+  }
+  return primaryTagRows.value
 }
 
 function canMoveTag(tag, direction) {
@@ -1047,7 +1048,7 @@ function getNextPosition(sourceTags, parentId) {
 }
 
 function getChildTagCount(tagId) {
-  return tags.value.filter(tag => tag.parent_id === tagId).length
+  return (childTagsByParentId.value.get(Number(tagId)) || []).length
 }
 
 function isPrimaryRootTag(tag) {
