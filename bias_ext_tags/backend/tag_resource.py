@@ -324,21 +324,44 @@ class TagResource(DatabaseResource):
             return True
         return super().can(user, ability, instance, context)
 
+    def creating(self, instance, context):
+        from bias_ext_tags.backend.events import TagCreatingEvent
+
+        _dispatch_tag_lifecycle_event(TagCreatingEvent(instance, context.get("user"), _request_body(context)))
+        return instance
+
+    def saving(self, instance, context):
+        from bias_ext_tags.backend.events import TagSavingEvent
+
+        _dispatch_tag_lifecycle_event(TagSavingEvent(instance, context.get("user"), _request_body(context)))
+        return instance
+
+    def deleting(self, instance, context) -> None:
+        from bias_ext_tags.backend.events import TagDeletingEvent
+
+        _dispatch_tag_lifecycle_event(TagDeletingEvent(instance, context.get("user")))
+
     def create_action(self, instance, context):
         from bias_ext_tags.backend.services import TagService
 
+        instance = self.creating(instance, context) or instance
+        instance = self.saving(instance, context) or instance
         payload = _service_payload_from_instance(instance, context, creating=True)
         return TagService.create_tag(user=context.get("user"), **payload)
 
     def update_action(self, instance, context):
         from bias_ext_tags.backend.services import TagService
 
+        original_values = _capture_tag_lifecycle_values(instance)
+        instance = self.saving(instance, context) or instance
         payload = _service_payload_from_instance(instance, context, creating=False)
+        payload.update(_changed_tag_lifecycle_values(instance, original_values))
         return TagService.update_tag(tag_id=instance.id, user=context.get("user"), **payload)
 
     def delete_action(self, instance, context) -> None:
         from bias_ext_tags.backend.services import TagService
 
+        self.deleting(instance, context)
         TagService.delete_tag(instance.id, context.get("user"))
 
 
@@ -504,6 +527,73 @@ def _service_payload_from_instance(tag, context, *, creating: bool) -> dict:
     if _request_includes_parent_relationship(context):
         requested_values["parent_id"] = tag.parent_id
     return requested_values
+
+
+def _dispatch_tag_lifecycle_event(event) -> None:
+    from bias_core.extensions.platform import get_runtime_forum_event_bus
+
+    get_runtime_forum_event_bus().dispatch(event)
+
+
+def _request_body(context):
+    if not isinstance(context, dict):
+        return {}
+    payload = context.get("payload")
+    return dict(payload) if isinstance(payload, dict) else {}
+
+
+def _capture_tag_lifecycle_values(tag) -> dict:
+    return {
+        field: getattr(tag, field, None)
+        for field in _TAG_LIFECYCLE_MUTABLE_FIELDS
+    }
+
+
+def _changed_tag_lifecycle_values(tag, original_values: dict) -> dict:
+    changed = {}
+    for field in _TAG_LIFECYCLE_MUTABLE_FIELDS:
+        current = getattr(tag, field, None)
+        if current == original_values.get(field):
+            continue
+        changed[_TAG_LIFECYCLE_SERVICE_FIELDS[field]] = current
+    return changed
+
+
+_TAG_LIFECYCLE_MUTABLE_FIELDS = (
+    "name",
+    "slug",
+    "description",
+    "color",
+    "icon",
+    "background_url",
+    "position",
+    "default_sort",
+    "is_primary",
+    "parent_id",
+    "is_hidden",
+    "is_restricted",
+    "view_scope",
+    "start_discussion_scope",
+    "reply_scope",
+)
+
+_TAG_LIFECYCLE_SERVICE_FIELDS = {
+    "name": "name",
+    "slug": "slug",
+    "description": "description",
+    "color": "color",
+    "icon": "icon",
+    "background_url": "background_url",
+    "position": "position",
+    "default_sort": "default_sort",
+    "is_primary": "is_primary",
+    "parent_id": "parent_id",
+    "is_hidden": "is_hidden",
+    "is_restricted": "is_restricted",
+    "view_scope": "view_scope",
+    "start_discussion_scope": "start_discussion_scope",
+    "reply_scope": "reply_scope",
+}
 
 
 def _request_attributes(context) -> dict:

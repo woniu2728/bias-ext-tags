@@ -15,6 +15,26 @@ class DiscussionTaggedEvent(DomainEvent):
 
 
 @dataclass(frozen=True)
+class TagCreatingEvent(DomainEvent):
+    tag: object
+    actor: object
+    data: dict
+
+
+@dataclass(frozen=True)
+class TagSavingEvent(DomainEvent):
+    tag: object
+    actor: object
+    data: dict
+
+
+@dataclass(frozen=True)
+class TagDeletingEvent(DomainEvent):
+    tag: object
+    actor: object
+
+
+@dataclass(frozen=True)
 class DiscussionTagStatsRefreshEvent(DomainEvent):
     discussion_id: int
 

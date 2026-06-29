@@ -34,7 +34,13 @@ from bias_core.extensions.testing import (
     reset_extension_application_bootstrap_state,
     reset_extension_runtime_state,
 )
-from bias_ext_tags.backend.events import DiscussionTaggedEvent, TagStatsRefreshRequestedEvent
+from bias_ext_tags.backend.events import (
+    DiscussionTaggedEvent,
+    TagCreatingEvent,
+    TagDeletingEvent,
+    TagSavingEvent,
+    TagStatsRefreshRequestedEvent,
+)
 from bias_ext_tags.backend.models import Tag
 from bias_ext_tags.backend.services import TagService
 from bias_ext_tags.backend.resources import tag_resource_endpoints
@@ -1482,6 +1488,97 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(update_response.json()["name"], "资源端点标签更新")
         self.assertEqual(delete_response.status_code, 200, delete_response.content)
         self.assertFalse(Tag.objects.filter(id=tag_id).exists())
+
+    def test_tag_write_resource_endpoints_dispatch_flarum_lifecycle_events(self):
+        events, dispatch_patch = capture_runtime_events()
+        with dispatch_patch:
+            create_response = self.client.post(
+                "/api/tags",
+                data=json.dumps({"name": "事件标签", "slug": "event-tag"}),
+                content_type="application/json",
+                **self.auth_header(self.admin),
+            )
+
+            self.assertEqual(create_response.status_code, 200, create_response.content)
+            tag_id = create_response.json()["id"]
+            update_response = self.client.patch(
+                f"/api/tags/{tag_id}",
+                data=json.dumps({"name": "事件标签更新"}),
+                content_type="application/json",
+                **self.auth_header(self.admin),
+            )
+            delete_response = self.client.delete(
+                f"/api/tags/{tag_id}",
+                **self.auth_header(self.admin),
+            )
+
+        self.assertEqual(update_response.status_code, 200, update_response.content)
+        self.assertEqual(delete_response.status_code, 200, delete_response.content)
+
+        creating_events = [event for event in events if isinstance(event, TagCreatingEvent)]
+        saving_events = [event for event in events if isinstance(event, TagSavingEvent)]
+        deleting_events = [event for event in events if isinstance(event, TagDeletingEvent)]
+        self.assertEqual(len(creating_events), 1)
+        self.assertEqual(len(saving_events), 2)
+        self.assertEqual(len(deleting_events), 1)
+        self.assertEqual(creating_events[0].tag.name, "事件标签")
+        self.assertEqual(creating_events[0].actor.id, self.admin.id)
+        self.assertEqual(creating_events[0].data["data"]["attributes"]["name"], "事件标签")
+        self.assertEqual(saving_events[0].tag.slug, "event-tag")
+        self.assertEqual(saving_events[1].tag.name, "事件标签更新")
+        self.assertEqual(deleting_events[0].tag.id, tag_id)
+
+    def test_tag_lifecycle_listeners_can_mutate_model_before_create_save(self):
+        from bias_core.extensions.platform import get_runtime_forum_event_bus
+
+        def mutate_created_tag(event):
+            event.tag.description = "created by lifecycle"
+            event.tag.color = "#123abc"
+
+        get_runtime_forum_event_bus().register(
+            TagSavingEvent,
+            mutate_created_tag,
+            listener_key="tests.tags.lifecycle.create",
+        )
+
+        response = self.client.post(
+            "/api/tags",
+            data=json.dumps({"name": "生命周期创建", "slug": "lifecycle-create"}),
+            content_type="application/json",
+            **self.auth_header(self.admin),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        tag = Tag.objects.get(id=response.json()["id"])
+        self.assertEqual(tag.description, "created by lifecycle")
+        self.assertEqual(tag.color, "#123abc")
+
+    def test_tag_lifecycle_listeners_can_mutate_model_before_update_save(self):
+        from bias_core.extensions.platform import get_runtime_forum_event_bus
+
+        def mutate_updated_tag(event):
+            if event.tag.id == self.public_tag.id:
+                event.tag.description = "updated by lifecycle"
+                event.tag.color = "#456def"
+
+        get_runtime_forum_event_bus().register(
+            TagSavingEvent,
+            mutate_updated_tag,
+            listener_key="tests.tags.lifecycle.update",
+        )
+
+        response = self.client.patch(
+            f"/api/tags/{self.public_tag.id}",
+            data=json.dumps({"name": "生命周期更新"}),
+            content_type="application/json",
+            **self.auth_header(self.admin),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.public_tag.refresh_from_db()
+        self.assertEqual(self.public_tag.name, "生命周期更新")
+        self.assertEqual(self.public_tag.description, "updated by lifecycle")
+        self.assertEqual(self.public_tag.color, "#456def")
 
     def test_tag_resource_persists_default_sort(self):
         create_response = self.client.post(
