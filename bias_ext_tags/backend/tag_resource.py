@@ -6,10 +6,10 @@ from bias_ext_tags.backend.models import Tag
 
 
 def tag_endpoint_specs() -> tuple[dict, ...]:
-    from bias_ext_tags.backend.handlers import (
+    from bias_ext_tags.backend.resource_endpoints import (
         dispatch_tag_popular,
     )
-    from bias_ext_tags.backend.handlers import (
+    from bias_ext_tags.backend.resource_endpoints import (
         core_delete_tag_response,
         core_index_tag_response,
         core_show_tag_response,
@@ -216,7 +216,7 @@ class TagResource(DatabaseResource):
     def query(self, context):
         from django.db.models import Prefetch, Q
 
-        from bias_ext_tags.backend.handlers import (
+        from bias_ext_tags.backend.resource_endpoints import (
             _can_include_hidden_tags,
             _tag_bool_query_value,
             _tag_current_discussion_tag_ids,
@@ -281,7 +281,7 @@ class TagResource(DatabaseResource):
         return TagService.filter_tags_for_user(queryset, user, action=action)
 
     def results(self, queryset, context):
-        from bias_ext_tags.backend.handlers import _apply_tag_resource_preloads
+        from bias_ext_tags.backend.resource_endpoints import _apply_tag_resource_preloads
         from bias_ext_tags.backend.services import TagService
 
         queryset = _apply_tag_resource_preloads(

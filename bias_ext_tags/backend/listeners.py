@@ -111,7 +111,7 @@ def _iter_discussion_tags(discussion):
 
 
 def _merge_tag_payload(target: dict, tag, *, fallback_discussion=None) -> None:
-    from bias_ext_tags.backend.handlers import _serialize_tag
+    from bias_ext_tags.backend.resource_endpoints import _serialize_tag
 
     payload = _serialize_tag(tag, user=None, include_children=False)
     if not payload or payload.get("id") is None:
