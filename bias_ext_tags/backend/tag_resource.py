@@ -188,7 +188,8 @@ class TagResource(DatabaseResource):
             .integer()
             .writable_when()
             .nullable_field()
-            .set_with(_set_tag_parent_id),
+            .set_with(_set_tag_parent_id)
+            .plain_only(),
         ]
 
     def endpoints(self) -> list:

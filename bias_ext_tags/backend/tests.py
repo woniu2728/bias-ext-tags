@@ -6,7 +6,7 @@ from pathlib import Path
 from django.core.exceptions import PermissionDenied
 from django.core.management import call_command
 from django.db import connection
-from django.test import TestCase, override_settings
+from django.test import RequestFactory, TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from ninja_jwt.tokens import RefreshToken
 from io import StringIO
@@ -2096,7 +2096,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
                 },
             }),
             content_type="application/json",
-            **self.auth_header(self.admin),
+            **self.jsonapi_header(self.admin),
         )
 
         self.assertEqual(response.status_code, 200, response.content)
@@ -2143,7 +2143,9 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
                         "isHidden": False,
                         "isPrimary": True,
                         "isRestricted": True,
-                        "parentId": self.public_tag.id,
+                    },
+                    "relationships": {
+                        "parent": {"data": {"type": "tags", "id": str(self.public_tag.id)}},
                     },
                 },
             }),
@@ -2164,6 +2166,28 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertTrue(tag.is_primary)
         self.assertTrue(tag.is_restricted)
         self.assertEqual(tag.parent_id, self.public_tag.id)
+
+    def test_tag_jsonapi_payload_ignores_plain_parent_id_alias(self):
+        tag = Tag.objects.create(name="Plain parentId alias", slug="plain-parent-id-alias")
+
+        response = self.client.patch(
+            f"/api/tags/{tag.id}",
+            data=json.dumps({
+                "data": {
+                    "type": "tag",
+                    "attributes": {
+                        "isPrimary": True,
+                        "parentId": self.public_tag.id,
+                    },
+                },
+            }),
+            content_type="application/json",
+            **self.jsonapi_header(self.admin),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        tag.refresh_from_db()
+        self.assertIsNone(tag.parent_id)
 
     def test_tag_api_rejects_read_only_flarum_default_sort_attribute(self):
         create_response = self.client.post(
@@ -2994,6 +3018,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
     def test_tag_resource_object_owns_flarum_writable_field_contract(self):
         registry = ResourceRegistry()
         registry.register_resource(TagResource())
+        jsonapi_request = RequestFactory().patch("/api/tags/1", HTTP_ACCEPT="application/vnd.api+json")
         fields = {
             field.field: field
             for field in registry.get_effective_fields("tag", {"user": self.admin})
@@ -3024,6 +3049,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertTrue(fields["default_sort"].writable)
         self.assertTrue(fields["parent_id"].writable)
         self.assertTrue(fields["parentId"].writable)
+        self.assertFalse(fields["parentId"].field_object.is_visible(None, {"request": jsonapi_request}))
         self.assertEqual(TagResource().jsonapi_types(), ("tag", "tags"))
         self.assertEqual(relationships["parent"].resource_type, "tag")
         self.assertFalse(relationships["parent"].many)
