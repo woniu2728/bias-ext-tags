@@ -29,6 +29,28 @@ def _get_runtime_forum_permissions(user):
     return get_runtime_forum_permissions(user)
 
 
+def _get_runtime_forum_permission_snapshot(user) -> tuple[str, ...]:
+    cached_permissions = getattr(user, "_forum_permission_cache", _UNSET)
+    if cached_permissions is _UNSET:
+        return tuple(sorted(str(permission or "").strip() for permission in _get_runtime_forum_permissions(user) if str(permission or "").strip()))
+
+    cache_key = id(cached_permissions)
+    snapshot_cache = getattr(user, "_tag_runtime_forum_permission_snapshot", None)
+    if (
+        isinstance(snapshot_cache, tuple)
+        and len(snapshot_cache) == 2
+        and snapshot_cache[0] == cache_key
+    ):
+        return snapshot_cache[1]
+
+    permissions = tuple(sorted(str(permission or "").strip() for permission in cached_permissions if str(permission or "").strip()))
+    try:
+        setattr(user, "_tag_runtime_forum_permission_snapshot", (cache_key, permissions))
+    except Exception:
+        pass
+    return permissions
+
+
 def _get_runtime_permission_model():
     from bias_core.extensions.runtime import get_runtime_permission_model
 
@@ -305,7 +327,10 @@ class TagService:
             return True
         if not user or not getattr(user, "is_authenticated", False):
             return False
-        return _has_runtime_forum_permission(user, f"tag{tag.id}.{ability}")
+
+        permissions = _get_runtime_forum_permission_snapshot(user)
+        permission = f"tag{tag.id}.{ability}"
+        return permission in permissions
 
     @staticmethod
     def can_view_discussion_tags(discussion, user: Optional[Any]) -> bool:
@@ -590,7 +615,7 @@ class TagService:
         if getattr(user, "is_superuser", False):
             return tuple(Tag.objects.filter(is_restricted=True).values_list("id", flat=True))
 
-        permissions = tuple(sorted(str(permission or "").strip() for permission in _get_runtime_forum_permissions(user)))
+        permissions = _get_runtime_forum_permission_snapshot(user)
         cache_key = (ability, permissions)
         cache = getattr(user, "_tag_restricted_permission_ids_cache", None)
         if cache is None:

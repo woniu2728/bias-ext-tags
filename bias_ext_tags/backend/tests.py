@@ -667,6 +667,60 @@ class TagsExtensionRuntimeTests(ExtensionRuntimeTestMixin, TestCase):
             "Permission snapshots should be fetched once per call, but tag-id parsing should reuse matching snapshots.",
         )
 
+    def test_restricted_tag_policy_reuses_forum_permission_cache(self):
+        self.bootstrap_extensions("tags")
+        member = User.objects.create_user(
+            username="tag-policy-cache-member",
+            email="tag-policy-cache-member@example.com",
+            password="password123",
+            is_email_confirmed=True,
+        )
+        tag = Tag.objects.create(
+            name="Policy Cache",
+            slug="policy-cache",
+            is_restricted=True,
+            view_scope=Tag.ACCESS_MEMBERS,
+        )
+        member._forum_permission_cache = {f"tag{tag.id}.viewForum"}
+
+        with patch(
+            "bias_ext_tags.backend.services._get_runtime_forum_permissions",
+            side_effect=AssertionError("tag policy should reuse the actor permission snapshot"),
+        ):
+            self.assertTrue(TagService.can_view_tag(tag, member))
+            self.assertTrue(TagService.can_view_tag(tag, member))
+
+        member._forum_permission_cache = set()
+        self.assertFalse(TagService.can_view_tag(tag, member))
+
+    def test_restricted_tag_policy_invalidates_snapshot_when_forum_permission_cache_is_cleared(self):
+        self.bootstrap_extensions("tags")
+        member = User.objects.create_user(
+            username="tag-policy-cache-clear-member",
+            email="tag-policy-cache-clear-member@example.com",
+            password="password123",
+            is_email_confirmed=True,
+        )
+        tag = Tag.objects.create(
+            name="Policy Cache Clear",
+            slug="policy-cache-clear",
+            is_restricted=True,
+            view_scope=Tag.ACCESS_MEMBERS,
+        )
+
+        member._forum_permission_cache = set()
+        self.assertFalse(TagService.can_view_tag(tag, member))
+
+        delattr(member, "_forum_permission_cache")
+
+        with patch(
+            "bias_ext_tags.backend.services._get_runtime_forum_permissions",
+            return_value={f"tag{tag.id}.viewForum"},
+        ) as get_permissions:
+            self.assertTrue(TagService.can_view_tag(tag, member))
+
+        self.assertEqual(get_permissions.call_count, 1)
+
     def test_tags_posts_integration_is_optional(self):
         self.disable_extension_for_test("posts")
         application = self.bootstrap_extensions("tags")
