@@ -33,10 +33,12 @@ def tag_endpoint_specs() -> tuple[ResourceEndpoint, ...]:
         .with_handler(dispatch_tag_popular),
         ResourceEndpoint.show()
         .at("/tags/{object_id}", absolute=True)
+        .select_related_with("last_posted_discussion", "parent")
         .can("view")
         .plain_response(core_show_tag_response),
         ResourceEndpoint.show("show-by-slug")
         .at("/tags/slug/{object_id}", absolute=True)
+        .select_related_with("last_posted_discussion", "parent")
         .can("view")
         .plain_response(core_show_tag_response),
         ResourceEndpoint.update()
@@ -285,7 +287,19 @@ class TagResource(DatabaseResource):
     def _detail_queryset(self, context):
         from bias_ext_tags.backend.services import TagService
 
-        queryset = Tag.objects.select_related("last_posted_discussion", "parent")
+        endpoint = context.get("endpoint") or "show"
+        registry = context.get("registry")
+        queryset = Tag.objects.all()
+        if registry is not None:
+            plan = registry.build_endpoint_preload_plan(
+                "tag",
+                endpoint,
+                {"method": context.get("method") or "GET", **dict(context)},
+            )
+            if plan.select_related:
+                queryset = queryset.select_related(*plan.select_related)
+        else:
+            queryset = queryset.select_related("last_posted_discussion", "parent")
         return TagService.prefetch_state_for_user(queryset, context.get("user"))
 
     def can(self, user, ability: str, instance, context) -> bool:

@@ -3031,6 +3031,8 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(endpoints["index"].kind, "index")
         self.assertEqual(endpoints["show-by-slug"].kind, "show")
         self.assertEqual(endpoints["show-by-slug"].ability, "view")
+        self.assertEqual(endpoints["show"].select_related, ("last_posted_discussion", "parent"))
+        self.assertEqual(endpoints["show-by-slug"].select_related, ("last_posted_discussion", "parent"))
         self.assertEqual(endpoints["update"].kind, "update")
         self.assertIsNone(endpoints["index"].response_callback)
         self.assertFalse(endpoints["index"].response_callback_only)
