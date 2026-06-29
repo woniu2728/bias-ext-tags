@@ -200,6 +200,9 @@ class TagResource(DatabaseResource):
     def jsonapi_types(self) -> tuple[str, ...]:
         return ("tag", "tags")
 
+    def jsonapi_type(self) -> str:
+        return "tags"
+
     def relationships(self) -> list:
         return [
             ResourceRelationship("parent", resolver=_resolve_tag_parent, module_id=EXTENSION_ID)

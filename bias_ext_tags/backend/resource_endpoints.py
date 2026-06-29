@@ -125,7 +125,7 @@ def _jsonapi_tag_response(tag, context, *, action="view", status=200):
         include=resource_options.includes,
     )
     return JsonResponse(
-        _flarum_jsonapi_document(document),
+        document,
         status=status,
         content_type="application/vnd.api+json",
     )
@@ -144,33 +144,9 @@ def _jsonapi_tags_response(tags, context, *, action="view"):
         many=True,
     )
     return JsonResponse(
-        _flarum_jsonapi_document(document),
+        document,
         content_type="application/vnd.api+json",
     )
-
-
-def _flarum_jsonapi_document(value):
-    if isinstance(value, list):
-        return [_flarum_jsonapi_document(item) for item in value]
-    if not isinstance(value, dict):
-        return value
-    output = {
-        key: _flarum_jsonapi_document(item)
-        for key, item in value.items()
-    }
-    resource_type = output.get("type")
-    if resource_type in {"tag", "discussion"}:
-        output["type"] = f"{resource_type}s"
-    links = output.get("links")
-    if isinstance(links, dict):
-        self_link = links.get("self")
-        if isinstance(self_link, str):
-            links["self"] = (
-                self_link
-                .replace("/api/tag/", "/api/tags/")
-                .replace("/api/discussion/", "/api/discussions/")
-            )
-    return output
 
 
 def _apply_tag_resource_preloads(queryset, user=None, action="view", resource_options=None):
@@ -277,7 +253,7 @@ def core_show_tag_response(context, response):
     if _wants_jsonapi_response(context):
         if isinstance(response, dict):
             return JsonResponse(
-                _flarum_jsonapi_document(response),
+                response,
                 content_type="application/vnd.api+json",
             )
         return response
@@ -318,13 +294,13 @@ def core_write_tag_response(context, response):
         if isinstance(response, tuple):
             status, payload = response
             return JsonResponse(
-                _flarum_jsonapi_document(payload),
+                payload,
                 status=status,
                 content_type="application/vnd.api+json",
             )
         if isinstance(response, dict):
             return JsonResponse(
-                _flarum_jsonapi_document(response),
+                response,
                 content_type="application/vnd.api+json",
             )
         return response

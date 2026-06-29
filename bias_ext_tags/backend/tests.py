@@ -3119,9 +3119,11 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
             include=("parent",),
         )
 
-        self.assertEqual(document["data"]["type"], "tag")
-        self.assertEqual(document["data"]["relationships"]["parent"]["data"], {"type": "tag", "id": str(self.public_tag.id)})
-        self.assertEqual(document["included"][0]["type"], "tag")
+        self.assertEqual(document["data"]["type"], "tags")
+        self.assertEqual(document["data"]["links"]["self"], f"/api/tags/{child.id}")
+        self.assertEqual(document["data"]["relationships"]["parent"]["data"], {"type": "tags", "id": str(self.public_tag.id)})
+        self.assertEqual(document["included"][0]["type"], "tags")
+        self.assertEqual(document["included"][0]["links"]["self"], f"/api/tags/{self.public_tag.id}")
         self.assertEqual(document["included"][0]["id"], str(self.public_tag.id))
 
     def test_guest_cannot_view_staff_tag_detail(self):
