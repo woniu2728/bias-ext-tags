@@ -5,7 +5,7 @@ from bias_ext_tags.backend.constants import EXTENSION_ID
 from bias_ext_tags.backend.models import Tag
 
 
-def tag_endpoint_specs() -> tuple[dict, ...]:
+def tag_endpoint_specs() -> tuple[ResourceEndpoint, ...]:
     from bias_ext_tags.backend.responses import (
         dispatch_tag_popular,
     )
@@ -17,72 +17,40 @@ def tag_endpoint_specs() -> tuple[dict, ...]:
     )
 
     return (
-        {
-            "name": "create",
-            "methods": ("POST",),
-            "path": "/tags",
-            "absolute_path": True,
-            "auth_required": True,
-            "ability": "create",
-            "kind": "create",
-            "forum_permission": "tag.create",
-            "plain_response_callback": core_write_tag_response,
-        },
-        {
-            "name": "index",
-            "methods": ("GET",),
-            "path": "/tags",
-            "absolute_path": True,
-            "kind": "index",
-            "default_include": ("parent",),
-            "plain_response_callback": core_index_tag_response,
-        },
-        {
-            "name": "popular",
-            "handler": dispatch_tag_popular,
-            "methods": ("GET",),
-            "path": "/tags/popular",
-            "absolute_path": True,
-        },
-        {
-            "name": "show",
-            "methods": ("GET",),
-            "path": "/tags/{object_id}",
-            "absolute_path": True,
-            "ability": "view",
-            "kind": "show",
-            "plain_response_callback": core_show_tag_response,
-        },
-        {
-            "name": "show-by-slug",
-            "methods": ("GET",),
-            "path": "/tags/slug/{object_id}",
-            "absolute_path": True,
-            "ability": "view",
-            "kind": "show",
-            "plain_response_callback": core_show_tag_response,
-        },
-        {
-            "name": "update",
-            "methods": ("PATCH",),
-            "path": "/tags/{object_id}",
-            "absolute_path": True,
-            "auth_required": True,
-            "ability": "edit",
-            "kind": "update",
-            "forum_permission": "tag.edit",
-            "plain_response_callback": core_write_tag_response,
-        },
-        {
-            "name": "delete",
-            "methods": ("DELETE",),
-            "path": "/tags/{object_id}",
-            "absolute_path": True,
-            "auth_required": True,
-            "ability": "delete",
-            "kind": "delete",
-            "plain_response_callback": core_delete_tag_response,
-        },
+        ResourceEndpoint.create()
+        .at("/tags", absolute=True)
+        .authenticated()
+        .can("create")
+        .requires_permission("tag.create")
+        .plain_response(core_write_tag_response),
+        ResourceEndpoint.index()
+        .at("/tags", absolute=True)
+        .add_default_include(("parent",))
+        .plain_response(core_index_tag_response),
+        ResourceEndpoint.index("popular")
+        .at("/tags/popular", absolute=True)
+        .as_kind("")
+        .with_handler(dispatch_tag_popular),
+        ResourceEndpoint.show()
+        .at("/tags/{object_id}", absolute=True)
+        .can("view")
+        .plain_response(core_show_tag_response),
+        ResourceEndpoint.show("show-by-slug")
+        .at("/tags/slug/{object_id}", absolute=True)
+        .can("view")
+        .plain_response(core_show_tag_response),
+        ResourceEndpoint.update()
+        .with_methods("PATCH")
+        .at("/tags/{object_id}", absolute=True)
+        .authenticated()
+        .can("edit")
+        .requires_permission("tag.edit")
+        .plain_response(core_write_tag_response),
+        ResourceEndpoint.delete()
+        .at("/tags/{object_id}", absolute=True)
+        .authenticated()
+        .can("delete")
+        .plain_response(core_delete_tag_response),
     )
 
 
@@ -193,10 +161,7 @@ class TagResource(DatabaseResource):
         ]
 
     def endpoints(self) -> list:
-        return [
-            ResourceEndpoint(module_id=EXTENSION_ID, **spec)
-            for spec in tag_endpoint_specs()
-        ]
+        return [endpoint.for_module(EXTENSION_ID) for endpoint in tag_endpoint_specs()]
 
     def accepts_legacy_payload(self, context) -> bool:
         return True
