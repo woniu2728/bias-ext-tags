@@ -9,7 +9,7 @@ class Migration(migrations.Migration):
     initial = True
 
     dependencies = [
-        ("discussions", "0001_initial"),
+        ("content", "0001_initial"),
     ]
 
     operations = [
@@ -45,7 +45,7 @@ class Migration(migrations.Migration):
                         null=True,
                         on_delete=django.db.models.deletion.SET_NULL,
                         related_name="+",
-                        to="discussions.discussion",
+                        to="content.discussion",
                     ),
                 ),
                 (
@@ -82,7 +82,7 @@ class Migration(migrations.Migration):
                     models.ForeignKey(
                         on_delete=django.db.models.deletion.CASCADE,
                         related_name="discussion_tags",
-                        to="discussions.discussion",
+                        to="content.discussion",
                     ),
                 ),
                 (

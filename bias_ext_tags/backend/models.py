@@ -39,7 +39,7 @@ class Tag(models.Model):
     discussion_count = models.IntegerField(default=0)
     last_posted_at = models.DateTimeField(null=True, blank=True)
     last_posted_discussion = models.ForeignKey(
-        "discussions.Discussion",
+        "content.Discussion",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
@@ -68,7 +68,7 @@ class DiscussionTag(models.Model):
     讨论标签关系，由 tags 扩展拥有。
     """
 
-    discussion = models.ForeignKey("discussions.Discussion", on_delete=models.CASCADE, related_name="discussion_tags")
+    discussion = models.ForeignKey("content.Discussion", on_delete=models.CASCADE, related_name="discussion_tags")
     tag = models.ForeignKey(Tag, on_delete=models.CASCADE, related_name="discussion_tags")
     created_at = models.DateTimeField(auto_now_add=True)
 

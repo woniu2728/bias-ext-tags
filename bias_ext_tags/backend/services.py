@@ -509,9 +509,13 @@ class TagService:
         if forbidden_tag_ids is None:
             return queryset
 
-        queryset = queryset.exclude(discussion_tags__tag_id__in=forbidden_tag_ids)
+        forbidden_discussion_ids = DiscussionTag.objects.filter(
+            tag_id__in=forbidden_tag_ids,
+        ).values("discussion_id")
+        queryset = queryset.exclude(id__in=forbidden_discussion_ids)
         if not TagService._has_global_permission(user, "viewForum"):
-            queryset = queryset.filter(discussion_tags__isnull=False)
+            tagged_discussion_ids = DiscussionTag.objects.values("discussion_id")
+            queryset = queryset.filter(id__in=tagged_discussion_ids)
         return queryset
 
     @staticmethod
@@ -520,9 +524,13 @@ class TagService:
         if forbidden_tag_ids is None:
             return queryset
 
-        queryset = queryset.exclude(discussion__discussion_tags__tag_id__in=forbidden_tag_ids)
+        forbidden_discussion_ids = DiscussionTag.objects.filter(
+            tag_id__in=forbidden_tag_ids,
+        ).values("discussion_id")
+        queryset = queryset.exclude(discussion_id__in=forbidden_discussion_ids)
         if not TagService._has_global_permission(user, "viewForum"):
-            queryset = queryset.filter(discussion__discussion_tags__isnull=False)
+            tagged_discussion_ids = DiscussionTag.objects.values("discussion_id")
+            queryset = queryset.filter(discussion_id__in=tagged_discussion_ids)
         return queryset
 
     @staticmethod

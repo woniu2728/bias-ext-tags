@@ -11,10 +11,18 @@ def get_discussion_tag_links(discussion):
         return list(prefetched["discussion_tags"])
 
     links = getattr(discussion, "discussion_tags", None)
-    if links is None:
+    if links is not None:
+        queryset = links.select_related("tag") if hasattr(links, "select_related") else links
+        return list(queryset.all() if hasattr(queryset, "all") else queryset)
+
+    discussion_id = getattr(discussion, "id", discussion)
+    if not discussion_id:
         return []
-    queryset = links.select_related("tag") if hasattr(links, "select_related") else links
-    return list(queryset.all() if hasattr(queryset, "all") else queryset)
+    return list(
+        DiscussionTag.objects.filter(discussion_id=discussion_id)
+        .select_related("tag")
+        .order_by("tag_id")
+    )
 
 
 def get_discussion_tags(discussion) -> list:
@@ -110,9 +118,13 @@ def replace_discussion_tags(discussion, tags: Iterable, *, previous_links: Itera
             "removed_tags": (),
         }
 
-    DiscussionTag.objects.filter(discussion=discussion).delete()
+    discussion_id = getattr(discussion, "id", discussion)
+    if not discussion_id:
+        raise ValueError("讨论对象缺少 id")
+
+    DiscussionTag.objects.filter(discussion_id=discussion_id).delete()
     DiscussionTag.objects.bulk_create([
-        DiscussionTag(discussion=discussion, tag=tag)
+        DiscussionTag(discussion_id=discussion_id, tag=tag)
         for tag in normalized_tags
     ])
     _clear_discussion_tags_prefetch_cache(discussion)
