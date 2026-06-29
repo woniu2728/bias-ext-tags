@@ -2237,6 +2237,48 @@ class TagSearchApiTests(ExtensionRuntimeTestMixin, TestCase):
             {first_discussion.id, second_discussion.id},
         )
 
+    def test_search_api_multiple_tag_filters_resolve_slugs_with_one_lookup(self):
+        primary_tag = Tag.objects.create(name="搜索交集主标签", slug="search-and-primary")
+        secondary_tag = Tag.objects.create(
+            name="搜索交集次标签",
+            slug="search-and-secondary",
+            position=None,
+            is_primary=False,
+        )
+        matched = create_runtime_discussion(
+            title="搜索标签交集命中",
+            content="shared-and-keyword",
+            user=self.user,
+            extension_payload=discussion_tags_payload([primary_tag.id, secondary_tag.id]),
+        )
+        create_runtime_discussion(
+            title="搜索标签交集缺一",
+            content="shared-and-keyword",
+            user=self.user,
+            extension_payload=discussion_tags_payload([primary_tag.id]),
+        )
+
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get(
+                "/api/search",
+                {"q": "shared-and-keyword tag:search-and-primary tag:search-and-secondary", "type": "discussions"},
+                **self.auth_header(),
+            )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual([item["id"] for item in response.json()["discussions"]], [matched.id])
+        slug_resolution_queries = [
+            query["sql"]
+            for query in queries
+            if 'from "tags"' in query["sql"].lower()
+            and '"slug" in' in query["sql"].lower()
+        ]
+        self.assertEqual(
+            len(slug_resolution_queries),
+            1,
+            f"Expected one batched slug lookup across repeated tag filters, got {len(slug_resolution_queries)}: {slug_resolution_queries}",
+        )
+
     def test_search_api_tag_filter_uses_active_slug_driver(self):
         set_active_slug_driver(Tag, "id_with_slug")
         first_tag = Tag.objects.create(name="搜索 ID 标签一", slug="search-id-filter-one")
