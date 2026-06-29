@@ -173,6 +173,50 @@ class TagsExtensionRuntimeTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertIn("tag.delete", permissions)
         self.assertEqual(permissions["tag.delete"].required_permissions, ("tag.edit",))
 
+    def test_tag_service_list_prefetches_direct_children_only(self):
+        parent = Tag.objects.create(name="服务父标签", slug="service-parent", position=0, is_primary=True)
+        visible_child = Tag.objects.create(name="服务子标签", slug="service-child", parent=parent, position=0, is_primary=True)
+        hidden_child = Tag.objects.create(
+            name="隐藏服务子标签",
+            slug="service-hidden-child",
+            parent=parent,
+            position=1,
+            is_primary=True,
+            is_hidden=True,
+        )
+        grandchild = Tag.objects.create(
+            name="服务孙级标签",
+            slug="service-grandchild",
+            parent=visible_child,
+            position=0,
+            is_primary=True,
+        )
+
+        with CaptureQueriesContext(connection) as queries:
+            tags = TagService.get_tag_list()
+
+        loaded_parent = next(tag for tag in tags if tag.id == parent.id)
+        loaded_child_slugs = [tag.slug for tag in loaded_parent._children_list]
+        self.assertEqual(loaded_child_slugs, ["service-child"])
+        self.assertFalse(hasattr(loaded_parent._children_list[0], "_children_list"))
+        self.assertNotIn(grandchild, loaded_parent._children_list)
+        self.assertNotIn(hidden_child.slug, loaded_child_slugs)
+
+        child_queries = [
+            query["sql"]
+            for query in queries
+            if 'from "tags"' in query["sql"].lower()
+            and re.search(r'where .*"tags"\."parent_id" in', query["sql"].lower())
+        ]
+        self.assertEqual(len(child_queries), 1)
+
+        tags_with_hidden = TagService.get_tag_list(include_hidden=True)
+        loaded_parent_with_hidden = next(tag for tag in tags_with_hidden if tag.id == parent.id)
+        self.assertEqual(
+            [tag.slug for tag in loaded_parent_with_hidden._children_list],
+            ["service-child", "service-hidden-child"],
+        )
+
     def test_tags_write_resource_endpoints_declare_forum_permissions(self):
         application = self.bootstrap_extensions("tags")
         endpoints = {

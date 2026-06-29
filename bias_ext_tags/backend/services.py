@@ -1,7 +1,7 @@
 import uuid
 from typing import Any, Optional, List
 from django.db import transaction
-from django.db.models import Count, F, Max, Q, QuerySet, Value, Window
+from django.db.models import Count, F, Max, Prefetch, Q, QuerySet, Value, Window
 from django.db.models.functions import Coalesce, RowNumber
 from django.core.exceptions import PermissionDenied
 from django.utils import timezone
@@ -822,54 +822,25 @@ class TagService:
         Returns:
             List[Tag]: 标签列表
         """
-        queryset = Tag.objects.all()
+        child_queryset = Tag.objects.all()
+        if not include_hidden:
+            child_queryset = child_queryset.filter(is_hidden=False)
+        child_queryset = child_queryset.order_by(*TagService.child_order_by())
 
-        # 过滤父标签
+        queryset = Tag.objects.prefetch_related(
+            Prefetch("children", queryset=child_queryset, to_attr="_children_list")
+        )
         if parent_id is None:
             queryset = queryset.filter(parent__isnull=True)
         else:
             queryset = queryset.filter(parent_id=parent_id)
 
-        # 过滤隐藏标签
         if not include_hidden:
             queryset = queryset.filter(is_hidden=False)
 
-        # 排序
         queryset = queryset.order_by(*TagService.structure_order_by())
 
-        tags = list(queryset)
-
-        # 递归加载子标签（使用临时属性）
-        for tag in tags:
-            tag._children_list = TagService._get_children(tag.id, include_hidden)
-
-        return tags
-
-    @staticmethod
-    def _get_children(parent_id: int, include_hidden: bool = False) -> List[Tag]:
-        """
-        递归获取子标签
-
-        Args:
-            parent_id: 父标签ID
-            include_hidden: 是否包含隐藏标签
-
-        Returns:
-            List[Tag]: 子标签列表
-        """
-        queryset = Tag.objects.filter(parent_id=parent_id)
-
-        if not include_hidden:
-            queryset = queryset.filter(is_hidden=False)
-
-        queryset = queryset.order_by(*TagService.child_order_by())
-        children = list(queryset)
-
-        # 递归加载子标签的子标签（使用临时属性）
-        for child in children:
-            child._children_list = TagService._get_children(child.id, include_hidden)
-
-        return children
+        return list(queryset)
 
     @staticmethod
     def get_tag_by_id(tag_id: int) -> Optional[Tag]:
