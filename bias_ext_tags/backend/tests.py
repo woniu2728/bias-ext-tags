@@ -3695,6 +3695,82 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(response.status_code, 400, response.content)
         self.assertIn("主标签", response.json()["error"])
 
+    def test_can_create_discussion_with_multiple_primary_tags_when_limit_allows(self):
+        set_tags_setting("max_primary_tags", 2)
+        first_tag = Tag.objects.create(name="前端多选", slug="frontend-multi")
+        second_tag = Tag.objects.create(name="后端多选", slug="backend-multi")
+
+        response = self.client.post(
+            "/api/discussions/",
+            data=json.dumps(discussion_resource_payload(
+                title="Multiple primary tags",
+                content="Allowed by configured primary count",
+                tag_ids=[first_tag.id, second_tag.id],
+            )),
+            content_type="application/json",
+            **self.auth_header(),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(
+            set(response.json()["tags"][index]["id"] for index in range(2)),
+            {first_tag.id, second_tag.id},
+        )
+
+    def test_can_create_discussion_with_multiple_secondary_tags_when_limit_allows(self):
+        set_tags_setting("max_secondary_tags", 2)
+        first_tag = Tag.objects.create(
+            name="公告多选",
+            slug="announcement-multi",
+            position=None,
+            is_primary=False,
+        )
+        second_tag = Tag.objects.create(
+            name="活动多选",
+            slug="event-multi",
+            position=None,
+            is_primary=False,
+        )
+
+        response = self.client.post(
+            "/api/discussions/",
+            data=json.dumps(discussion_resource_payload(
+                title="Multiple secondary tags",
+                content="Allowed by configured secondary count",
+                tag_ids=[first_tag.id, second_tag.id],
+            )),
+            content_type="application/json",
+            **self.auth_header(),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(
+            set(response.json()["tags"][index]["id"] for index in range(2)),
+            {first_tag.id, second_tag.id},
+        )
+
+    def test_multiple_child_tags_require_their_own_primary_parents(self):
+        set_tags_setting("max_primary_tags", 2)
+        set_tags_setting("max_secondary_tags", 2)
+        first_parent = Tag.objects.create(name="父级一", slug="parent-one")
+        second_parent = Tag.objects.create(name="父级二", slug="parent-two")
+        first_child = Tag.objects.create(name="子级一", slug="child-one", parent=first_parent)
+        second_child = Tag.objects.create(name="子级二", slug="child-two", parent=second_parent)
+
+        response = self.client.post(
+            "/api/discussions/",
+            data=json.dumps(discussion_resource_payload(
+                title="Mismatched multiple children",
+                content="Each child needs its parent",
+                tag_ids=[first_parent.id, first_child.id, second_child.id],
+            )),
+            content_type="application/json",
+            **self.auth_header(),
+        )
+
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn("对应的主标签", response.json()["error"])
+
     def test_cannot_create_discussion_with_mismatched_parent_child_tags(self):
         first_tag = Tag.objects.create(name="前端", slug="frontend-main")
         second_tag = Tag.objects.create(name="后端", slug="backend-main")

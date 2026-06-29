@@ -582,21 +582,24 @@ class TagService:
         primary_tags = [tag for tag in tags if TagService.is_primary_tag(tag)]
         secondary_tags = [tag for tag in tags if not TagService.is_primary_tag(tag)]
         child_tags = [tag for tag in secondary_tags if tag.parent_id is not None]
+        settings = get_extension_settings("tags")
+        max_primary = TagService._settings_int(settings, "max_primary_tags", default=1)
+        max_secondary = TagService._settings_int(settings, "max_secondary_tags", default=1)
 
-        if len(primary_tags) > 1:
-            raise ValueError("当前最多只能选择 1 个主标签")
+        if len(primary_tags) > max_primary:
+            raise ValueError(f"当前最多只能选择 {max_primary} 个主标签")
 
-        if len(secondary_tags) > 1:
-            raise ValueError("当前最多只能选择 1 个次标签")
+        if len(secondary_tags) > max_secondary:
+            raise ValueError(f"当前最多只能选择 {max_secondary} 个次标签")
 
-        if child_tags and not primary_tags:
+        primary_tag_ids = {tag.id for tag in primary_tags}
+        missing_parent_names = [
+            child.name
+            for child in child_tags
+            if child.parent_id not in primary_tag_ids
+        ]
+        if missing_parent_names:
             raise ValueError("选择次标签时必须同时选择对应的主标签")
-
-        if primary_tags and child_tags and child_tags[0].parent_id != primary_tags[0].id:
-            raise ValueError("次标签必须与对应的主标签一起选择")
-
-        if len(tags) > 2:
-            raise ValueError("当前最多只能选择 2 个标签")
 
         return primary_tags + secondary_tags
 
