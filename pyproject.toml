@@ -63,3 +63,6 @@ include = ["bias_ext_tags*"]
   "frontend/forum/useTagsViewBindings.test.js",
   "frontend/forum/useTagsViewModel.js",
 ]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "bias_core.extension_test_settings"
