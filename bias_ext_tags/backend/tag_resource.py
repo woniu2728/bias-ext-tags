@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from bias_core.extensions import DatabaseResource, ResourceEndpoint, ResourceField, ResourceRelationship
+from bias_core.extensions.platform import wants_jsonapi_response
 from bias_ext_tags.backend.constants import EXTENSION_ID
 from bias_ext_tags.backend.models import Tag
 
@@ -237,9 +238,9 @@ class TagResource(DatabaseResource):
             )
 
         parent_id = tag_int_query_value(context, "parent_id")
-        if parent_id is None:
+        if parent_id is None and not wants_jsonapi_response(context):
             queryset = queryset.filter(parent__isnull=True)
-        else:
+        elif parent_id is not None:
             queryset = queryset.filter(parent_id=parent_id)
         if not include_hidden:
             queryset = queryset.filter(is_hidden=False)

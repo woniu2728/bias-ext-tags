@@ -2440,17 +2440,32 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(payload["included"][0]["type"], "tags")
 
     def test_tag_index_can_return_flarum_jsonapi_document_when_requested(self):
+        child = Tag.objects.create(
+            name="JSONAPI 子标签",
+            slug="jsonapi-child-index",
+            parent=self.public_tag,
+            position=0,
+        )
+
         response = self.client.get(
             "/api/tags",
             **self.jsonapi_header(self.member),
+        )
+        plain_response = self.client.get(
+            "/api/tags",
+            **self.auth_header(self.member),
         )
 
         self.assertEqual(response.status_code, 200, response.content)
         payload = response.json()
         self.assertIn("data", payload)
-        self.assertEqual([item["type"] for item in payload["data"]], ["tags", "tags"])
+        self.assertTrue(all(item["type"] == "tags" for item in payload["data"]))
         slugs = [item["attributes"]["slug"] for item in payload["data"]]
-        self.assertEqual(slugs, ["public-tag", "members-tag"])
+        self.assertEqual(set(slugs), {"public-tag", "members-tag", child.slug})
+        self.assertEqual(
+            {item["slug"] for item in plain_response.json()["data"]},
+            {"public-tag", "members-tag"},
+        )
 
     def test_tag_detail_exposes_flarum_camel_case_base_fields(self):
         self.public_tag.default_sort = "latest"
