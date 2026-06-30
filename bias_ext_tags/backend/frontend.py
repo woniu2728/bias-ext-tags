@@ -15,7 +15,7 @@ def frontend_extender():
             description="浏览论坛标签，按主题发现相关讨论。",
             preloads=(
                 {
-                    "href": "/api/tags?include_children=true",
+                    "href": "/api/tags?include=children,lastPostedDiscussion,parent&include_children=true",
                     "as": "fetch",
                     "crossorigin": "anonymous",
                 },
@@ -43,7 +43,7 @@ def discussion_frontend_extender():
                     "crossorigin": "anonymous",
                 },
                 {
-                    "href": "/api/tags?include_children=true",
+                    "href": "/api/tags?include=children,lastPostedDiscussion,parent&include_children=true",
                     "as": "fetch",
                     "crossorigin": "anonymous",
                 },

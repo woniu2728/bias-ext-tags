@@ -1,5 +1,6 @@
 import { api } from '@bias/core'
 import { normalizeTag, unwrapTagList } from './tagUtils.js'
+import { buildTagTreeRequestOptions } from './tagTreeRequest.js'
 
 const tagTreeState = {
   loadingPromise: null,
@@ -44,9 +45,5 @@ export function getCachedTagTree() {
 }
 
 function fetchTagTree() {
-  return api.get('/tags', {
-    params: {
-      include_children: true,
-    },
-  })
+  return api.get('/tags', buildTagTreeRequestOptions())
 }
