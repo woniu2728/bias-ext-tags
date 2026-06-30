@@ -24,6 +24,13 @@ class TagCreatingEvent(DomainEvent):
 
 
 @dataclass(frozen=True)
+class TagCreatedEvent(DomainEvent):
+    tag: object
+    actor: object
+    data: dict
+
+
+@dataclass(frozen=True)
 class TagSavingEvent(DomainEvent):
     tag: object
     actor: object

@@ -343,10 +343,13 @@ class TagResource(DatabaseResource):
 
     def create_action(self, instance, context):
         from bias_ext_tags.backend.services import TagService
+        from bias_ext_tags.backend.events import TagCreatedEvent
 
         instance = self.creating(instance, context) or instance
         payload = _service_payload_from_instance(instance, context, creating=True)
-        return TagService.create_tag(user=context.get("user"), **payload)
+        tag = TagService.create_tag(user=context.get("user"), **payload)
+        _dispatch_tag_lifecycle_event(TagCreatedEvent(tag, context.get("user"), _request_body(context)))
+        return tag
 
     def update_action(self, instance, context):
         from bias_ext_tags.backend.services import TagService

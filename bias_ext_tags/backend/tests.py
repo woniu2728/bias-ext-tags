@@ -37,6 +37,7 @@ from bias_core.extensions.testing import (
 )
 from bias_ext_tags.backend.events import (
     DiscussionTaggedEvent,
+    TagCreatedEvent,
     TagCreatingEvent,
     TagDeletingEvent,
     TagSavingEvent,
@@ -1551,16 +1552,69 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(delete_response.status_code, 200, delete_response.content)
 
         creating_events = [event for event in events if isinstance(event, TagCreatingEvent)]
+        created_events = [event for event in events if isinstance(event, TagCreatedEvent)]
         saving_events = [event for event in events if isinstance(event, TagSavingEvent)]
         deleting_events = [event for event in events if isinstance(event, TagDeletingEvent)]
         self.assertEqual(len(creating_events), 1)
+        self.assertEqual(len(created_events), 1)
         self.assertEqual(len(saving_events), 1)
         self.assertEqual(len(deleting_events), 1)
         self.assertEqual(creating_events[0].tag.name, "事件标签")
         self.assertEqual(creating_events[0].actor.id, self.admin.id)
         self.assertEqual(creating_events[0].data["data"]["attributes"]["name"], "事件标签")
+        self.assertEqual(created_events[0].tag.id, tag_id)
         self.assertEqual(saving_events[0].tag.name, "事件标签更新")
         self.assertEqual(deleting_events[0].tag.id, tag_id)
+
+    def test_tag_write_resource_endpoints_write_flarum_style_audit_logs(self):
+        create_response = self.client.post(
+            "/api/tags",
+            data=json.dumps({"name": "审计资源标签", "slug": "audit-resource-tag"}),
+            content_type="application/json",
+            **self.auth_header(self.admin),
+        )
+
+        self.assertEqual(create_response.status_code, 200, create_response.content)
+        tag_id = create_response.json()["id"]
+        update_response = self.client.patch(
+            f"/api/tags/{tag_id}",
+            data=json.dumps({"name": "审计资源标签更新"}),
+            content_type="application/json",
+            **self.auth_header(self.admin),
+        )
+        delete_response = self.client.delete(
+            f"/api/tags/{tag_id}",
+            **self.auth_header(self.admin),
+        )
+
+        self.assertEqual(update_response.status_code, 200, update_response.content)
+        self.assertEqual(delete_response.status_code, 200, delete_response.content)
+
+        created_log = AuditLog.objects.get(action="tag.created")
+        updated_log = AuditLog.objects.get(action="tag.updated")
+        deleted_log = AuditLog.objects.get(action="tag.deleted")
+        self.assertEqual(created_log.user_id, self.admin.id)
+        self.assertEqual(created_log.target_type, "tag")
+        self.assertEqual(created_log.target_id, tag_id)
+        self.assertEqual(created_log.data["tag_id"], tag_id)
+        self.assertEqual(updated_log.target_id, tag_id)
+        self.assertEqual(updated_log.data["changed_fields"], ["name"])
+        self.assertEqual(deleted_log.target_id, tag_id)
+        self.assertEqual(deleted_log.data["slug"], "audit-resource-tag")
+
+    def test_tag_updated_audit_ignores_metadata_only_lifecycle_update(self):
+        from bias_core.extensions.platform import get_runtime_forum_event_bus
+
+        self.public_tag.discussion_count = 12
+        get_runtime_forum_event_bus().dispatch(
+            TagSavingEvent(
+                self.public_tag,
+                self.admin,
+                {"data": {"attributes": {"discussion_count": 12}}},
+            )
+        )
+
+        self.assertFalse(AuditLog.objects.filter(action="tag.updated").exists())
 
     def test_tag_lifecycle_listeners_can_mutate_model_before_create_save(self):
         from bias_core.extensions.platform import get_runtime_forum_event_bus

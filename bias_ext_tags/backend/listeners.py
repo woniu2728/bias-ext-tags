@@ -3,8 +3,22 @@ from bias_core.extensions.platform import log_admin_action
 from bias_ext_tags.backend.events import (
     DiscussionTaggedEvent,
     DiscussionTagStatsRefreshEvent,
+    TagCreatedEvent,
+    TagCreatingEvent,
+    TagDeletingEvent,
+    TagSavingEvent,
     TagStatsRefreshRequestedEvent,
 )
+
+
+TAG_AUDIT_METADATA_FIELDS = {
+    "discussion_count",
+    "last_posted_at",
+    "last_posted_discussion",
+    "last_posted_discussion_id",
+    "last_posted_user",
+    "last_posted_user_id",
+}
 
 
 def create_runtime_timeline_from_builder(*args, **kwargs):
@@ -47,6 +61,21 @@ def tag_event_listener_definitions():
             event_type=TagStatsRefreshRequestedEvent,
             handler=handle_tag_stats_refresh_requested,
             description="调度标签统计刷新任务。",
+        ),
+        ExtensionEventListenerDefinition(
+            event_type=TagCreatedEvent,
+            handler=handle_tag_created_audit,
+            description="记录标签创建审计日志。",
+        ),
+        ExtensionEventListenerDefinition(
+            event_type=TagSavingEvent,
+            handler=handle_tag_updated_audit,
+            description="记录标签更新审计日志并忽略统计元数据刷新。",
+        ),
+        ExtensionEventListenerDefinition(
+            event_type=TagDeletingEvent,
+            handler=handle_tag_deleted_audit,
+            description="记录标签删除审计日志。",
         ),
     )
 
@@ -214,3 +243,56 @@ def handle_tag_stats_refresh_requested(event: TagStatsRefreshRequestedEvent) -> 
         return
 
     dispatch_runtime_tag_stats_refresh(list(event.tag_ids))
+
+
+def handle_tag_created_audit(event: TagCreatedEvent) -> None:
+    tag = event.tag
+    log_admin_action(
+        event.actor,
+        "tag.created",
+        target_type="tag",
+        target_id=getattr(tag, "id", None),
+        data={"tag_id": getattr(tag, "id", None), "slug": getattr(tag, "slug", "")},
+    )
+
+
+def handle_tag_updated_audit(event: TagSavingEvent) -> None:
+    changed_fields = _tag_lifecycle_changed_fields(event)
+    if changed_fields and set(changed_fields).issubset(TAG_AUDIT_METADATA_FIELDS):
+        return
+
+    tag = event.tag
+    log_admin_action(
+        event.actor,
+        "tag.updated",
+        target_type="tag",
+        target_id=getattr(tag, "id", None),
+        data={
+            "tag_id": getattr(tag, "id", None),
+            "slug": getattr(tag, "slug", ""),
+            "changed_fields": changed_fields,
+        },
+    )
+
+
+def handle_tag_deleted_audit(event: TagDeletingEvent) -> None:
+    tag = event.tag
+    log_admin_action(
+        event.actor,
+        "tag.deleted",
+        target_type="tag",
+        target_id=getattr(tag, "id", None),
+        data={"tag_id": getattr(tag, "id", None), "slug": getattr(tag, "slug", "")},
+    )
+
+
+def _tag_lifecycle_changed_fields(event: TagSavingEvent) -> list[str]:
+    body = getattr(event, "data", None)
+    if not isinstance(body, dict):
+        return []
+    attributes = body.get("attributes")
+    if attributes is None and isinstance(body.get("data"), dict):
+        attributes = body["data"].get("attributes")
+    if not isinstance(attributes, dict):
+        return []
+    return sorted(str(key) for key in attributes if str(key))
