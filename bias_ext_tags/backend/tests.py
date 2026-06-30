@@ -2491,6 +2491,34 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         )
         self.assertEqual(non_prefix_response.json()["data"], [])
 
+    def test_tag_index_jsonapi_include_children_uses_visible_child_linkage(self):
+        visible_child = Tag.objects.create(
+            name="JSONAPI include 子标签",
+            slug="jsonapi-include-child",
+            parent=self.public_tag,
+            position=0,
+        )
+        Tag.objects.create(
+            name="JSONAPI include 隐藏子标签",
+            slug="jsonapi-include-hidden-child",
+            parent=self.public_tag,
+            is_hidden=True,
+            position=1,
+        )
+
+        response = self.client.get(
+            "/api/tags",
+            {"include": "children"},
+            **self.jsonapi_header(self.member),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        public_payload = next(item for item in payload["data"] if item["id"] == str(self.public_tag.id))
+        child_linkage = public_payload["relationships"]["children"]["data"]
+        self.assertEqual(child_linkage, [{"type": "tags", "id": str(visible_child.id)}])
+        self.assertIn(str(visible_child.id), {item["id"] for item in payload["data"]})
+
     def test_tag_detail_exposes_flarum_camel_case_base_fields(self):
         self.public_tag.default_sort = "latest"
         self.public_tag.discussion_count = 3

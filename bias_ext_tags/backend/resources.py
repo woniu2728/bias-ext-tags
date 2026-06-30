@@ -463,8 +463,9 @@ def _tag_relationship_resource_id(value) -> int | None:
 
 
 def resolve_tag_children(tag, context: dict) -> list[Tag]:
+    jsonapi_children_requested = wants_jsonapi_response(context) and "children" in tuple(context.get("include") or ())
     depth = int(context.get("plain_children_depth") or 0)
-    if depth <= 0:
+    if depth <= 0 and not jsonapi_children_requested:
         return []
     children = getattr(tag, "visible_children", None)
     if children is None:
