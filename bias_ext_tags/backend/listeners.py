@@ -6,6 +6,7 @@ from bias_ext_tags.backend.events import (
     TagCreatedEvent,
     TagCreatingEvent,
     TagDeletingEvent,
+    TagSavedEvent,
     TagSavingEvent,
     TagStatsRefreshRequestedEvent,
 )
@@ -68,7 +69,7 @@ def tag_event_listener_definitions():
             description="记录标签创建审计日志。",
         ),
         ExtensionEventListenerDefinition(
-            event_type=TagSavingEvent,
+            event_type=TagSavedEvent,
             handler=handle_tag_updated_audit,
             description="记录标签更新审计日志并忽略统计元数据刷新。",
         ),
@@ -256,9 +257,11 @@ def handle_tag_created_audit(event: TagCreatedEvent) -> None:
     )
 
 
-def handle_tag_updated_audit(event: TagSavingEvent) -> None:
-    changed_fields = _tag_lifecycle_changed_fields(event)
-    if changed_fields and set(changed_fields).issubset(TAG_AUDIT_METADATA_FIELDS):
+def handle_tag_updated_audit(event: TagSavedEvent) -> None:
+    changed_fields = tuple(str(field) for field in getattr(event, "changed_fields", ()) if str(field))
+    if not changed_fields:
+        return
+    if set(changed_fields).issubset(TAG_AUDIT_METADATA_FIELDS):
         return
 
     tag = event.tag
@@ -270,7 +273,7 @@ def handle_tag_updated_audit(event: TagSavingEvent) -> None:
         data={
             "tag_id": getattr(tag, "id", None),
             "slug": getattr(tag, "slug", ""),
-            "changed_fields": changed_fields,
+            "changed_fields": sorted(changed_fields),
         },
     )
 
@@ -285,14 +288,3 @@ def handle_tag_deleted_audit(event: TagDeletingEvent) -> None:
         data={"tag_id": getattr(tag, "id", None), "slug": getattr(tag, "slug", "")},
     )
 
-
-def _tag_lifecycle_changed_fields(event: TagSavingEvent) -> list[str]:
-    body = getattr(event, "data", None)
-    if not isinstance(body, dict):
-        return []
-    attributes = body.get("attributes")
-    if attributes is None and isinstance(body.get("data"), dict):
-        attributes = body["data"].get("attributes")
-    if not isinstance(attributes, dict):
-        return []
-    return sorted(str(key) for key in attributes if str(key))

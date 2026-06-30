@@ -40,6 +40,7 @@ from bias_ext_tags.backend.events import (
     TagCreatedEvent,
     TagCreatingEvent,
     TagDeletingEvent,
+    TagSavedEvent,
     TagSavingEvent,
     TagStatsRefreshRequestedEvent,
 )
@@ -1554,16 +1555,19 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         creating_events = [event for event in events if isinstance(event, TagCreatingEvent)]
         created_events = [event for event in events if isinstance(event, TagCreatedEvent)]
         saving_events = [event for event in events if isinstance(event, TagSavingEvent)]
+        saved_events = [event for event in events if isinstance(event, TagSavedEvent)]
         deleting_events = [event for event in events if isinstance(event, TagDeletingEvent)]
         self.assertEqual(len(creating_events), 1)
         self.assertEqual(len(created_events), 1)
         self.assertEqual(len(saving_events), 1)
+        self.assertEqual(len(saved_events), 1)
         self.assertEqual(len(deleting_events), 1)
         self.assertEqual(creating_events[0].tag.name, "事件标签")
         self.assertEqual(creating_events[0].actor.id, self.admin.id)
         self.assertEqual(creating_events[0].data["data"]["attributes"]["name"], "事件标签")
         self.assertEqual(created_events[0].tag.id, tag_id)
         self.assertEqual(saving_events[0].tag.name, "事件标签更新")
+        self.assertEqual(saved_events[0].changed_fields, ("name",))
         self.assertEqual(deleting_events[0].tag.id, tag_id)
 
     def test_tag_write_resource_endpoints_write_flarum_style_audit_logs(self):
@@ -1607,13 +1611,25 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
 
         self.public_tag.discussion_count = 12
         get_runtime_forum_event_bus().dispatch(
-            TagSavingEvent(
+            TagSavedEvent(
                 self.public_tag,
                 self.admin,
                 {"data": {"attributes": {"discussion_count": 12}}},
+                changed_fields=("discussion_count",),
             )
         )
 
+        self.assertFalse(AuditLog.objects.filter(action="tag.updated").exists())
+
+    def test_tag_updated_audit_ignores_noop_resource_update(self):
+        response = self.client.patch(
+            f"/api/tags/{self.public_tag.id}",
+            data=json.dumps({"name": self.public_tag.name}),
+            content_type="application/json",
+            **self.auth_header(self.admin),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
         self.assertFalse(AuditLog.objects.filter(action="tag.updated").exists())
 
     def test_tag_lifecycle_listeners_can_mutate_model_before_create_save(self):

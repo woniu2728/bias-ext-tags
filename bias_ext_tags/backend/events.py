@@ -38,6 +38,14 @@ class TagSavingEvent(DomainEvent):
 
 
 @dataclass(frozen=True)
+class TagSavedEvent(DomainEvent):
+    tag: object
+    actor: object
+    data: dict
+    changed_fields: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class TagDeletingEvent(DomainEvent):
     tag: object
     actor: object

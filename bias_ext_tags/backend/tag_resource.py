@@ -353,12 +353,19 @@ class TagResource(DatabaseResource):
 
     def update_action(self, instance, context):
         from bias_ext_tags.backend.services import TagService
+        from bias_ext_tags.backend.events import TagSavedEvent
 
-        original_values = _capture_tag_lifecycle_values(instance)
+        original_values = _capture_tag_persisted_values(instance)
         instance = self.saving(instance, context) or instance
         payload = _service_payload_from_instance(instance, context, creating=False)
         payload.update(_changed_tag_lifecycle_values(instance, original_values))
-        return TagService.update_tag(tag_id=instance.id, user=context.get("user"), **payload)
+        saved_tag = TagService.update_tag(tag_id=instance.id, user=context.get("user"), **payload)
+        changed_fields = _changed_tag_lifecycle_field_names(saved_tag, original_values)
+        if changed_fields:
+            _dispatch_tag_lifecycle_event(
+                TagSavedEvent(saved_tag, context.get("user"), _request_body(context), changed_fields=changed_fields)
+            )
+        return saved_tag
 
     def delete_action(self, instance, context) -> None:
         from bias_ext_tags.backend.services import TagService
@@ -593,6 +600,16 @@ def _capture_tag_lifecycle_values(tag) -> dict:
     }
 
 
+def _capture_tag_persisted_values(tag) -> dict:
+    from bias_ext_tags.backend.models import Tag
+
+    tag_id = getattr(tag, "id", None)
+    if not tag_id:
+        return _capture_tag_lifecycle_values(tag)
+    persisted = Tag.objects.only(*_TAG_LIFECYCLE_MUTABLE_FIELDS).get(id=tag_id)
+    return _capture_tag_lifecycle_values(persisted)
+
+
 def _changed_tag_lifecycle_values(tag, original_values: dict) -> dict:
     changed = {}
     for field in _TAG_LIFECYCLE_MUTABLE_FIELDS:
@@ -601,6 +618,16 @@ def _changed_tag_lifecycle_values(tag, original_values: dict) -> dict:
             continue
         changed[_TAG_LIFECYCLE_SERVICE_FIELDS[field]] = current
     return changed
+
+
+def _changed_tag_lifecycle_field_names(tag, original_values: dict) -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            _TAG_LIFECYCLE_SERVICE_FIELDS[field]
+            for field in _TAG_LIFECYCLE_MUTABLE_FIELDS
+            if getattr(tag, field, None) != original_values.get(field)
+        )
+    )
 
 
 _TAG_LIFECYCLE_MUTABLE_FIELDS = (
