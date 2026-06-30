@@ -82,12 +82,14 @@ def model_visibility_definitions():
     return (
         ExtensionModelVisibilityDefinition(
             model=DISCUSSION_MODEL,
-            ability="view",
+            ability="*",
             scope=lambda queryset, context: TagService.filter_discussions_for_user(
                 queryset,
                 context.get("user"),
+                ability=context.get("ability") or "view",
+                context=context,
             ),
-            description="隐藏当前用户不可查看标签下的讨论。",
+            description="按当前能力隐藏用户在标签权限下不可访问的讨论。",
         ),
         ExtensionModelVisibilityDefinition(
             model=Tag,

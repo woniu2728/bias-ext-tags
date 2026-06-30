@@ -130,6 +130,16 @@ class TagService:
         "viewForum": "view",
         "startDiscussion": "start_discussion",
     }
+    DISCUSSION_VISIBILITY_ABILITY_ACTIONS = {
+        "view": "view",
+        "viewForum": "view",
+        "start_discussion": "start_discussion",
+        "startDiscussion": "start_discussion",
+        "add_to_discussion": "add_to_discussion",
+        "addToDiscussion": "add_to_discussion",
+        "reply": "reply",
+        "discussion.reply": "reply",
+    }
 
     @staticmethod
     def primary_tag_filter(prefix: str = ""):
@@ -522,19 +532,27 @@ class TagService:
         return queryset.filter(visibility_filter)
 
     @staticmethod
-    def _tag_visibility_filter(user: Optional[Any], action: str = "view"):
+    def _tag_visibility_filter(
+        user: Optional[Any],
+        action: str = "view",
+        *,
+        permission: Optional[str] = None,
+    ):
         scope_field = TagService.ACTION_SCOPE_FIELD.get(action)
-        if not scope_field:
-            return None
+        use_scope_filter = bool(scope_field)
 
-        own_visibility = TagService._tag_scope_filter(user, scope_field)
-        parent_visibility = Q(parent_id__isnull=True) | TagService._tag_scope_filter(
-            user,
-            scope_field,
-            prefix="parent__",
-        )
+        if use_scope_filter:
+            own_visibility = TagService._tag_scope_filter(user, scope_field)
+            parent_visibility = Q(parent_id__isnull=True) | TagService._tag_scope_filter(
+                user,
+                scope_field,
+                prefix="parent__",
+            )
+        else:
+            own_visibility = Q()
+            parent_visibility = Q()
 
-        restricted_permission = TagService.ACTION_RESTRICTED_PERMISSION.get(action)
+        restricted_permission = permission or TagService.ACTION_RESTRICTED_PERMISSION.get(action)
         if not restricted_permission:
             return own_visibility & parent_visibility
 
@@ -542,10 +560,15 @@ class TagService:
             user,
             restricted_permission,
         )
-        own_restricted = TagService._tag_restricted_filter(allowed_restricted_tag_ids)
+        allow_unrestricted = use_scope_filter or TagService._has_global_permission(user, restricted_permission)
+        own_restricted = TagService._tag_restricted_filter(
+            allowed_restricted_tag_ids,
+            allow_unrestricted=allow_unrestricted,
+        )
         parent_restricted = Q(parent_id__isnull=True) | TagService._tag_restricted_filter(
             allowed_restricted_tag_ids,
             prefix="parent__",
+            allow_unrestricted=allow_unrestricted,
         )
         return own_visibility & own_restricted & parent_visibility & parent_restricted
 
@@ -557,12 +580,19 @@ class TagService:
         return Q(**{field: Tag.ACCESS_PUBLIC})
 
     @staticmethod
-    def _tag_restricted_filter(allowed_restricted_tag_ids: tuple[int, ...], *, prefix: str = ""):
+    def _tag_restricted_filter(
+        allowed_restricted_tag_ids: tuple[int, ...],
+        *,
+        prefix: str = "",
+        allow_unrestricted: bool = True,
+    ):
         restricted_field = f"{prefix}is_restricted"
         id_field = f"{prefix}id"
-        visibility = Q(**{restricted_field: False})
+        visibility = Q(**{restricted_field: False}) if allow_unrestricted else Q()
         if allowed_restricted_tag_ids:
             visibility |= Q(**{f"{id_field}__in": allowed_restricted_tag_ids})
+        elif not allow_unrestricted:
+            visibility &= Q(**{f"{id_field}__in": []})
         return visibility
 
     @staticmethod
@@ -573,8 +603,27 @@ class TagService:
         return list(forbidden_tag_ids.values_list("id", flat=True))
 
     @staticmethod
-    def filter_discussions_for_user(queryset: QuerySet, user: Optional[Any]) -> QuerySet:
-        forbidden_tag_ids = TagService._forbidden_tag_ids_queryset(user, action="view")
+    def filter_discussions_for_user(
+        queryset: QuerySet,
+        user: Optional[Any],
+        *,
+        ability: str = "view",
+        context: Optional[dict] = None,
+    ) -> QuerySet:
+        if TagService._is_discussion_view_internal_visibility_branch(ability, context):
+            return queryset
+        permission = TagService._discussion_visibility_permission(ability)
+        if permission is None:
+            return queryset
+        if context is not None:
+            applied = context.setdefault("_tags_discussion_visibility_applied", set())
+            marker = (str(permission), getattr(user, "id", None))
+            if marker in applied:
+                return queryset
+            applied.add(marker)
+
+        action = TagService._discussion_visibility_action(permission)
+        forbidden_tag_ids = TagService._forbidden_tag_ids_queryset(user, action=action, permission=permission)
         if forbidden_tag_ids is None:
             return queryset
 
@@ -582,7 +631,7 @@ class TagService:
             tag_id__in=forbidden_tag_ids,
         ).values("discussion_id")
         queryset = queryset.exclude(id__in=forbidden_discussion_ids)
-        if not TagService._has_global_permission(user, "viewForum"):
+        if not TagService._has_global_permission(user, permission):
             tagged_discussion_ids = DiscussionTag.objects.values("discussion_id")
             queryset = queryset.filter(id__in=tagged_discussion_ids)
         return queryset
@@ -603,6 +652,27 @@ class TagService:
         return queryset
 
     @staticmethod
+    def _discussion_visibility_permission(ability: str) -> str | None:
+        normalized = str(ability or "view").strip() or "view"
+        if normalized.startswith("view") and normalized != "view":
+            return None
+        if normalized.endswith("InRestrictedTags"):
+            return None
+        return "viewForum" if normalized == "view" else normalized
+
+    @staticmethod
+    def _discussion_visibility_action(permission: str) -> str:
+        return TagService.DISCUSSION_VISIBILITY_ABILITY_ACTIONS.get(permission, permission)
+
+    @staticmethod
+    def _is_discussion_view_internal_visibility_branch(ability: str, context: Optional[dict]) -> bool:
+        if not context:
+            return False
+        parent_ability = str(context.get("_discussion_visibility_parent_ability") or "")
+        normalized = str(ability or "view").strip() or "view"
+        return parent_ability == "view" and normalized != "view"
+
+    @staticmethod
     def _has_global_permission(user: Optional[Any], ability: str) -> bool:
         if user and (getattr(user, "is_staff", False) or getattr(user, "is_superuser", False)):
             return True
@@ -611,10 +681,19 @@ class TagService:
         return _has_runtime_forum_permission(user, ability)
 
     @staticmethod
-    def _forbidden_tag_ids_queryset(user: Optional[Any], action: str = "view"):
+    def _forbidden_tag_ids_queryset(
+        user: Optional[Any],
+        action: str = "view",
+        *,
+        permission: Optional[str] = None,
+    ):
         if user and (user.is_staff or user.is_superuser):
             return None
-        visibility_filter = TagService._tag_visibility_filter(user, action=action)
+        visibility_filter = TagService._tag_visibility_filter(
+            user,
+            action=action,
+            permission=permission,
+        )
         if visibility_filter is None:
             return None
         return Tag.objects.exclude(visibility_filter).values("id")

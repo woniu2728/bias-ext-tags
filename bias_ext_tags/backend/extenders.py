@@ -253,7 +253,12 @@ def discussion_wrapper_integration_extenders():
 
 
 def _filter_discussions_for_user(queryset, context: dict):
-    return TagService.filter_discussions_for_user(queryset, context.get("user"))
+    return TagService.filter_discussions_for_user(
+        queryset,
+        context.get("user"),
+        ability=context.get("ability") or "view",
+        context=context,
+    )
 
 
 def service_extenders():

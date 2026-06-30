@@ -35,6 +35,7 @@ from bias_core.extensions.testing import (
     reset_extension_application_bootstrap_state,
     reset_extension_runtime_state,
 )
+from bias_core.extensions.platform import apply_model_visibility_scope
 from bias_ext_tags.backend.events import (
     DiscussionTaggedEvent,
     TagCreatedEvent,
@@ -5560,6 +5561,183 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
 
         self.assertEqual(allowed_response.status_code, 200, allowed_response.content)
         self.assertIn(discussion.id, {item["id"] for item in allowed_response.json()["data"]})
+
+    def test_discussion_visibility_scope_filters_arbitrary_ability_like_flarum(self):
+        open_tag = Tag.objects.create(name="Arbitrary Open", slug="arbitrary-open")
+        child_parent = Tag.objects.create(name="Arbitrary Parent", slug="arbitrary-parent")
+        restricted_child = Tag.objects.create(
+            name="Arbitrary Child",
+            slug="arbitrary-child",
+            parent=child_parent,
+            is_restricted=True,
+        )
+        restricted_secondary = Tag.objects.create(
+            name="Arbitrary Secondary",
+            slug="arbitrary-secondary",
+            is_primary=False,
+            is_restricted=True,
+        )
+        closed_parent = Tag.objects.create(
+            name="Arbitrary Closed Parent",
+            slug="arbitrary-closed-parent",
+            is_restricted=True,
+        )
+        closed_child = Tag.objects.create(
+            name="Arbitrary Closed Child",
+            slug="arbitrary-closed-child",
+            parent=closed_parent,
+            is_restricted=True,
+        )
+        root_restricted = Tag.objects.create(
+            name="Arbitrary Root Restricted",
+            slug="arbitrary-root-restricted",
+            is_restricted=True,
+        )
+        admin = User.objects.create_superuser(
+            username="arbitrary-visibility-admin",
+            email="arbitrary-visibility-admin@example.com",
+            password="password123",
+        )
+        untagged = create_runtime_discussion(
+            title="Arbitrary no tags",
+            content="No tags.",
+            user=admin,
+            extension_payload=discussion_tags_payload([]),
+        )
+        open_discussion = create_runtime_discussion(
+            title="Arbitrary open",
+            content="Open tag.",
+            user=admin,
+            extension_payload=discussion_tags_payload([open_tag.id]),
+        )
+        child_discussion = create_runtime_discussion(
+            title="Arbitrary child",
+            content="Open parent and restricted child.",
+            user=admin,
+            extension_payload=discussion_tags_payload([child_parent.id, restricted_child.id]),
+        )
+        secondary_discussion = create_runtime_discussion(
+            title="Arbitrary secondary",
+            content="Open plus restricted secondary.",
+            user=admin,
+            extension_payload=discussion_tags_payload([open_tag.id, restricted_secondary.id]),
+        )
+        closed_discussion = create_runtime_discussion(
+            title="Arbitrary closed",
+            content="Both tags are off limits.",
+            user=admin,
+            extension_payload=discussion_tags_payload([closed_parent.id, closed_child.id]),
+        )
+        child_only_discussion = create_runtime_discussion(
+            title="Arbitrary child only",
+            content="Child permission cannot bypass parent.",
+            user=admin,
+            extension_payload=discussion_tags_payload([closed_parent.id, closed_child.id]),
+        )
+        DiscussionTag.objects.filter(discussion_id=child_only_discussion.id, tag_id=closed_parent.id).delete()
+        root_restricted_discussion = create_runtime_discussion(
+            title="Arbitrary root restricted",
+            content="Root restricted tag with explicit permission.",
+            user=admin,
+            extension_payload=discussion_tags_payload([root_restricted.id]),
+        )
+
+        group = Group.objects.create(name="ArbitraryVisibility", color="#4d698e")
+        for permission in (
+            "arbitraryAbility",
+            f"tag{restricted_child.id}.arbitraryAbility",
+            f"tag{restricted_secondary.id}.arbitraryAbility",
+            f"tag{closed_child.id}.arbitraryAbility",
+            f"tag{root_restricted.id}.arbitraryAbility",
+        ):
+            Permission.objects.create(group=group, permission=permission)
+        self.reader.user_groups.add(group)
+
+        Discussion = type(untagged)
+        queryset = Discussion.objects.filter(id__in=[
+            untagged.id,
+            open_discussion.id,
+            child_discussion.id,
+            secondary_discussion.id,
+            closed_discussion.id,
+            child_only_discussion.id,
+            root_restricted_discussion.id,
+        ])
+        visible_ids = set(
+            apply_model_visibility_scope(
+                Discussion,
+                queryset,
+                user=self.reader,
+                ability="arbitraryAbility",
+            ).values_list("id", flat=True)
+        )
+
+        self.assertEqual(
+            visible_ids,
+            {
+                untagged.id,
+                open_discussion.id,
+                child_discussion.id,
+                secondary_discussion.id,
+                root_restricted_discussion.id,
+            },
+        )
+
+        Permission.objects.filter(group=group, permission="arbitraryAbility").delete()
+        if hasattr(self.reader, "_forum_permission_cache"):
+            delattr(self.reader, "_forum_permission_cache")
+        visible_without_global = set(
+            apply_model_visibility_scope(
+                Discussion,
+                queryset,
+                user=self.reader,
+                ability="arbitraryAbility",
+            ).values_list("id", flat=True)
+        )
+
+        self.assertEqual(visible_without_global, {root_restricted_discussion.id})
+
+    def test_discussion_visibility_scope_skips_view_sub_abilities_and_restricted_tag_override(self):
+        staff_tag = Tag.objects.create(
+            name="View Private Staff",
+            slug="view-private-staff",
+            view_scope=Tag.ACCESS_STAFF,
+            start_discussion_scope=Tag.ACCESS_STAFF,
+            reply_scope=Tag.ACCESS_STAFF,
+        )
+        admin = User.objects.create_superuser(
+            username="view-private-admin",
+            email="view-private-admin@example.com",
+            password="password123",
+        )
+        discussion = create_runtime_discussion(
+            title="View private should not apply tag scope",
+            content="Flarum skips view sub-abilities in tags scope.",
+            user=admin,
+            extension_payload=discussion_tags_payload([staff_tag.id]),
+        )
+        Discussion = type(discussion)
+        queryset = Discussion.objects.filter(id=discussion.id)
+
+        view_private_ids = set(
+            apply_model_visibility_scope(
+                Discussion,
+                queryset,
+                user=self.reader,
+                ability="viewPrivate",
+            ).values_list("id", flat=True)
+        )
+        restricted_override_ids = set(
+            apply_model_visibility_scope(
+                Discussion,
+                queryset,
+                user=self.reader,
+                ability="viewForumInRestrictedTags",
+            ).values_list("id", flat=True)
+        )
+
+        self.assertEqual(view_private_ids, {discussion.id})
+        self.assertEqual(restricted_override_ids, {discussion.id})
 
     def test_discussion_list_does_not_re_enumerate_tags_for_permission_scopes(self):
         tags = [
