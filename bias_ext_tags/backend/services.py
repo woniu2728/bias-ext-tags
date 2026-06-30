@@ -423,6 +423,12 @@ class TagService:
     def state_for_user(tag: Tag, user: Optional[Any]) -> Optional[TagState]:
         if not user or not getattr(user, "is_authenticated", False):
             return None
+        prefetched = getattr(tag, "_prefetched_objects_cache", {})
+        if "user_states" in prefetched:
+            for state in prefetched["user_states"]:
+                if state.user_id == user.id:
+                    return state
+            return TagState(tag=tag, user=user)
         prefetched_states = getattr(tag, "actor_states", None)
         if prefetched_states is not None:
             for state in prefetched_states:
