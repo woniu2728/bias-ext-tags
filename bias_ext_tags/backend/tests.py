@@ -2439,6 +2439,43 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         )
         self.assertEqual(payload["included"][0]["type"], "tags")
 
+    def test_tag_detail_jsonapi_supports_flarum_nested_parent_children_include(self):
+        first_child = Tag.objects.create(
+            name="JSONAPI 嵌套子标签一",
+            slug="jsonapi-nested-child-one",
+            parent=self.public_tag,
+            position=0,
+        )
+        second_child = Tag.objects.create(
+            name="JSONAPI 嵌套子标签二",
+            slug="jsonapi-nested-child-two",
+            parent=self.public_tag,
+            position=1,
+        )
+        Tag.objects.create(
+            name="JSONAPI 嵌套隐藏子标签",
+            slug="jsonapi-nested-hidden-child",
+            parent=self.public_tag,
+            is_hidden=True,
+            position=2,
+        )
+
+        response = self.client.get(
+            f"/api/tags/{second_child.id}",
+            {"include": "parent.children.parent"},
+            **self.jsonapi_header(self.member),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        included_ids = {item["id"] for item in payload.get("included", [])}
+        self.assertEqual(included_ids, {str(self.public_tag.id), str(first_child.id)})
+        parent_payload = next(item for item in payload["included"] if item["id"] == str(self.public_tag.id))
+        self.assertEqual(
+            parent_payload["relationships"]["children"]["data"],
+            [{"type": "tags", "id": str(first_child.id)}, {"type": "tags", "id": str(second_child.id)}],
+        )
+
     def test_tag_index_can_return_flarum_jsonapi_document_when_requested(self):
         child = Tag.objects.create(
             name="JSONAPI 子标签",
