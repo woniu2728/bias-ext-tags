@@ -830,6 +830,7 @@ async function deleteTag(tag) {
   try {
     await adminApi.delete(`/admin/tags/${tag.id}`)
     await loadTags()
+    closeModal()
     await modalStore.alert({
       title: tagsActionMeta.value?.deleteSuccessTitle || '标签已删除',
       message: tagsActionMeta.value?.deleteSuccessMessage?.(tag.name) || `标签“${tag.name}”已删除。`,
@@ -1206,15 +1207,13 @@ function isSecondaryRootTag(tag) {
 .TagCard-inlineActions {
   display: flex;
   gap: 8px;
-  opacity: 0;
-  pointer-events: none;
+  opacity: 0.72;
   transition: opacity 0.18s ease;
 }
 
 .TagCard:hover .TagCard-inlineActions,
 .TagCard:focus-within .TagCard-inlineActions {
   opacity: 1;
-  pointer-events: auto;
 }
 
 .TagCard-actionIcon {
