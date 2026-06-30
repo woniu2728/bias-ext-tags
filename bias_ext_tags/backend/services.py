@@ -32,6 +32,10 @@ def _get_runtime_forum_permissions(user):
 def _get_runtime_forum_permission_snapshot(user) -> tuple[str, ...]:
     cached_permissions = getattr(user, "_forum_permission_cache", _UNSET)
     if cached_permissions is _UNSET:
+        try:
+            delattr(user, "_tag_runtime_forum_permission_snapshot")
+        except AttributeError:
+            pass
         return tuple(sorted(str(permission or "").strip() for permission in _get_runtime_forum_permissions(user) if str(permission or "").strip()))
 
     cache_key = id(cached_permissions)
@@ -490,12 +494,19 @@ class TagService:
         if cache_key in cache:
             return dict(cache[cache_key])
 
-        allowed = TagService.filter_tags_for_user(Tag.objects.all(), user, action=action)
+        allowed_counts = TagService.filter_tags_for_user(Tag.objects.all(), user, action=action).aggregate(
+            allowed_primary=Count("id", filter=TagService.policy_primary_tag_filter()),
+            allowed_secondary=Count("id", filter=TagService.policy_secondary_tag_filter()),
+        )
+        total_counts = Tag.objects.aggregate(
+            total_primary=Count("id", filter=TagService.policy_primary_tag_filter()),
+            total_secondary=Count("id", filter=TagService.policy_secondary_tag_filter()),
+        )
         counts = {
-            "allowed_primary": allowed.filter(TagService.policy_primary_tag_filter()).count(),
-            "allowed_secondary": allowed.filter(TagService.policy_secondary_tag_filter()).count(),
-            "total_primary": Tag.objects.filter(TagService.policy_primary_tag_filter()).count(),
-            "total_secondary": Tag.objects.filter(TagService.policy_secondary_tag_filter()).count(),
+            "allowed_primary": int(allowed_counts.get("allowed_primary") or 0),
+            "allowed_secondary": int(allowed_counts.get("allowed_secondary") or 0),
+            "total_primary": int(total_counts.get("total_primary") or 0),
+            "total_secondary": int(total_counts.get("total_secondary") or 0),
         }
         cache[cache_key] = counts
         return dict(counts)

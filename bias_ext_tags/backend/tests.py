@@ -657,8 +657,8 @@ class TagsExtensionRuntimeTests(ExtensionRuntimeTestMixin, TestCase):
         ]
         self.assertLessEqual(
             len(tag_count_queries),
-            4,
-            "Tag global policy should cache primary/secondary tag count checks per user and action.",
+            2,
+            "Tag global policy should aggregate primary/secondary tag count checks and cache them per user and action.",
         )
 
     def test_tag_service_management_checks_use_forum_permissions(self):
@@ -844,7 +844,11 @@ class TagsExtensionRuntimeTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertFalse(any(item.module_id == "tags" for item in forum_registry.get_search_filters()))
 
 
-class TagStatsTests(TestCase):
+class TagStatsTests(ExtensionRuntimeTestMixin, TestCase):
+    def _pre_setup(self):
+        super()._pre_setup()
+        self.bootstrap_extensions("tags")
+
     def setUp(self):
         self.user = User.objects.create_user(
             username="tagger",
@@ -889,6 +893,7 @@ class TagStatsTests(TestCase):
             title="历史讨论",
             content="历史内容",
             user=self.user,
+            extension_payload=discussion_tags_payload([]),
         )
         DiscussionTag.objects.create(discussion=discussion, tag=self.tag)
         Tag.objects.filter(id=self.tag.id).update(discussion_count=0)
@@ -903,6 +908,7 @@ class TagStatsTests(TestCase):
             title="命令刷新统计",
             content="命令刷新内容",
             user=self.user,
+            extension_payload=discussion_tags_payload([]),
         )
         DiscussionTag.objects.create(discussion=discussion, tag=self.tag)
         Tag.objects.filter(id=self.tag.id).update(discussion_count=0)
@@ -925,11 +931,13 @@ class TagStatsTests(TestCase):
                 title=f"Batch discussion {index} older",
                 content="Older discussion",
                 user=self.user,
+                extension_payload=discussion_tags_payload([]),
             )
             second = create_runtime_discussion(
                 title=f"Batch discussion {index} newer",
                 content="Newer discussion",
                 user=self.user,
+                extension_payload=discussion_tags_payload([]),
             )
             DiscussionTag.objects.create(discussion=first, tag=tag)
             DiscussionTag.objects.create(discussion=second, tag=tag)
@@ -1643,8 +1651,8 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
             **self.auth_header(self.admin),
         )
 
-        self.assertEqual(slash_response.status_code, 400, slash_response.content)
-        self.assertEqual(space_response.status_code, 400, space_response.content)
+        self.assertEqual(slash_response.status_code, 422, slash_response.content)
+        self.assertEqual(space_response.status_code, 422, space_response.content)
         self.assertFalse(Tag.objects.filter(name__in=["非法 slug 标签", "非法空白 slug 标签"]).exists())
 
     def test_tag_resource_rejects_description_longer_than_flarum_limit(self):
@@ -1659,7 +1667,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
             **self.auth_header(self.admin),
         )
 
-        self.assertEqual(response.status_code, 400, response.content)
+        self.assertEqual(response.status_code, 422, response.content)
         self.assertFalse(Tag.objects.filter(slug="long-description-tag").exists())
 
     def test_member_with_tag_management_permissions_can_use_resource_endpoints(self):
@@ -3810,6 +3818,7 @@ class TagSearchApiTests(ExtensionRuntimeTestMixin, TestCase):
             title="未标记排除讨论",
             content="shared-negated-untagged-keyword",
             user=self.user,
+            extension_payload=discussion_tags_payload([]),
         )
 
         response = self.client.get(
@@ -3872,6 +3881,7 @@ class TagSearchApiTests(ExtensionRuntimeTestMixin, TestCase):
             title="搜索未标记讨论",
             content="shared-untagged-keyword",
             user=self.user,
+            extension_payload=discussion_tags_payload([]),
         )
 
         with CaptureQueriesContext(connection) as queries:
@@ -4062,6 +4072,7 @@ class TagSearchApiTests(ExtensionRuntimeTestMixin, TestCase):
             title="帖子未标记讨论",
             content="首帖内容",
             user=self.user,
+            extension_payload=discussion_tags_payload([]),
         )
         create_runtime_post(
             discussion_id=tagged_discussion.id,
@@ -4838,6 +4849,7 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
             title="不会被未知标签命中",
             content="未知标签应返回空列表。",
             user=self.author,
+            extension_payload=discussion_tags_payload([]),
         )
 
         response = self.client.get("/api/discussions/", {"tag": "missing-filter-tag"})
@@ -4858,6 +4870,7 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
             title="列表大小写未命中",
             content="不应被标签筛选命中。",
             user=self.author,
+            extension_payload=discussion_tags_payload([]),
         )
 
         response = self.client.get("/api/discussions/", {"tag": "CASE-LIST-TAG"})
@@ -4878,6 +4891,7 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
             title="未标记讨论",
             content="应出现在 untagged 过滤中。",
             user=self.author,
+            extension_payload=discussion_tags_payload([]),
         )
 
         response = self.client.get("/api/discussions/", {"tag": "untagged"})
@@ -5187,6 +5201,7 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
             title="Untagged without global view",
             content="Should be hidden without viewForum",
             user=self.author,
+            extension_payload=discussion_tags_payload([]),
         )
         tagged_discussion = create_runtime_discussion(
             title="Tagged without global view",
