@@ -3534,6 +3534,7 @@ class TagForumSettingsTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertIsNotNone(endpoint)
         self.assertIn("tags", endpoint.default_include)
         self.assertIn("tags.parent", endpoint.default_include)
+        self.assertIn("tags.lastPostedDiscussion", endpoint.default_include)
 
     def test_public_forum_settings_expose_tags_forum_resource_fields(self):
         parent = Tag.objects.create(

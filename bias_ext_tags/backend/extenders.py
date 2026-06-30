@@ -194,7 +194,7 @@ def resource_extenders():
         ApiResourceExtender("forum")
         .fields(forum_resource_field_definitions)
         .relationships(forum_resource_relationship_definitions)
-        .add_default_include(("show",), ("tags", "tags.parent")),
+        .add_default_include(("show",), ("tags", "tags.parent", "tags.lastPostedDiscussion")),
         ApiResourceExtender(tag_resource_definition())
         .fields(tag_resource_field_definitions)
         .relationships(tag_resource_relationship_definitions),
