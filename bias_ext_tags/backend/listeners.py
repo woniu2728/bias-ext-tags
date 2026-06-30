@@ -1,4 +1,5 @@
 from bias_core.extensions import ExtensionEventListenerDefinition
+from bias_core.extensions.platform import log_admin_action
 from bias_ext_tags.backend.events import (
     DiscussionTaggedEvent,
     DiscussionTagStatsRefreshEvent,
@@ -132,11 +133,55 @@ def handle_discussion_approved_tag_stats(event) -> None:
 
 
 def handle_discussion_tagged(event: DiscussionTaggedEvent) -> None:
+    log_discussion_tagged_audit(event)
     create_runtime_timeline_from_builder(
         event,
         "discussion_tagged",
         extra={"post_type": "discussionTagged"},
         merge_strategy="same_actor_reversible",
+    )
+
+
+def log_discussion_tagged_audit(event: DiscussionTaggedEvent) -> None:
+    from django.contrib.auth import get_user_model
+    from bias_ext_tags.backend.models import Tag
+
+    actor = None
+    actor_user_id = getattr(event, "actor_user_id", None)
+    if actor_user_id:
+        actor = get_user_model().objects.filter(id=actor_user_id).first()
+
+    current_slugs = tuple(
+        Tag.objects.filter(discussion_tags__discussion_id=event.discussion_id)
+        .order_by("slug")
+        .values_list("slug", flat=True)
+    )
+    added_slugs = tuple(
+        Tag.objects.filter(id__in=event.added_tag_ids)
+        .order_by("slug")
+        .values_list("slug", flat=True)
+    )
+    removed_slugs = tuple(
+        Tag.objects.filter(id__in=event.removed_tag_ids)
+        .order_by("slug")
+        .values_list("slug", flat=True)
+    )
+    previous_slugs = tuple(
+        sorted((set(current_slugs) - set(added_slugs)) | set(removed_slugs))
+    )
+
+    log_admin_action(
+        actor,
+        "discussion.tagged",
+        target_type="discussion",
+        target_id=event.discussion_id,
+        data={
+            "discussion_id": event.discussion_id,
+            "old_tags": list(previous_slugs),
+            "new_tags": list(current_slugs),
+            "added_tags": list(added_slugs),
+            "removed_tags": list(removed_slugs),
+        },
     )
 
 

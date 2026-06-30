@@ -12,6 +12,8 @@ class DiscussionTaggedEvent(DomainEvent):
     added_tags: tuple[str, ...] = ()
     removed_tags: tuple[str, ...] = ()
     tag_ids: tuple[int, ...] = ()
+    added_tag_ids: tuple[int, ...] = ()
+    removed_tag_ids: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)

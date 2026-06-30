@@ -53,6 +53,8 @@ def set_discussion_tags_relationship(discussion, value, context: dict | None = N
                     added_tags=added_tags,
                     removed_tags=removed_tags,
                     tag_ids=affected_tag_ids,
+                    added_tag_ids=tuple(result["added_tag_ids"]),
+                    removed_tag_ids=tuple(result["removed_tag_ids"]),
                 )
             )
 

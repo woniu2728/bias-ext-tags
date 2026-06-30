@@ -5669,6 +5669,52 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
             tagged_event.tag_ids,
             tuple(sorted((parent_tag.id, old_child_tag.id, new_child_tag.id))),
         )
+        self.assertEqual(tagged_event.added_tag_ids, (new_child_tag.id,))
+        self.assertEqual(tagged_event.removed_tag_ids, (old_child_tag.id,))
+
+    def test_updating_discussion_tags_writes_audit_log_like_flarum(self):
+        member_group = Group.objects.create(name="DiscussionTagAuditEditor", color="#4d698e")
+        Permission.objects.create(group=member_group, permission="startDiscussion")
+        Permission.objects.create(group=member_group, permission="discussion.reply")
+        self.author.user_groups.add(member_group)
+
+        shared_tag = Tag.objects.create(name="审计保留标签", slug="audit-shared-tag", color="#4d698e")
+        original_tag = Tag.objects.create(
+            name="审计旧标签",
+            slug="audit-old-tag",
+            color="#2980b9",
+            parent=shared_tag,
+        )
+        new_tag = Tag.objects.create(
+            name="审计新标签",
+            slug="audit-new-tag",
+            color="#e67e22",
+            parent=shared_tag,
+        )
+        discussion = create_runtime_discussion(
+            title="Retag audit",
+            content="Original content",
+            user=self.author,
+            extension_payload=discussion_tags_payload([shared_tag.id, original_tag.id]),
+        )
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.patch(
+                f"/api/discussions/{discussion.id}",
+                data=json.dumps(discussion_tags_payload([shared_tag.id, new_tag.id])),
+                content_type="application/json",
+                **self.auth_header(),
+            )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        audit_log = AuditLog.objects.get(action="discussion.tagged")
+        self.assertEqual(audit_log.user_id, self.author.id)
+        self.assertEqual(audit_log.target_type, "discussion")
+        self.assertEqual(audit_log.target_id, discussion.id)
+        self.assertEqual(audit_log.data["old_tags"], ["audit-old-tag", "audit-shared-tag"])
+        self.assertEqual(audit_log.data["new_tags"], ["audit-new-tag", "audit-shared-tag"])
+        self.assertEqual(audit_log.data["added_tags"], ["audit-new-tag"])
+        self.assertEqual(audit_log.data["removed_tags"], ["audit-old-tag"])
 
     def test_replacing_discussion_tags_clears_prefetched_relationship_cache(self):
         from bias_ext_tags.backend.discussion_relationships import set_discussion_tags_relationship
