@@ -2467,6 +2467,30 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
             {"public-tag", "members-tag"},
         )
 
+    def test_tag_index_filter_q_matches_flarum_prefix_search(self):
+        matched_by_name = Tag.objects.create(name="Support", slug="help")
+        matched_by_slug = Tag.objects.create(name="Docs", slug="support-docs")
+        Tag.objects.create(name="Community Support", slug="community-support")
+
+        response = self.client.get(
+            "/api/tags",
+            {"filter[q]": "sup"},
+            **self.jsonapi_header(self.member),
+        )
+        non_prefix_response = self.client.get(
+            "/api/tags",
+            {"filter[q]": "port"},
+            **self.jsonapi_header(self.member),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(non_prefix_response.status_code, 200, non_prefix_response.content)
+        self.assertEqual(
+            {int(item["id"]) for item in response.json()["data"]},
+            {matched_by_name.id, matched_by_slug.id},
+        )
+        self.assertEqual(non_prefix_response.json()["data"], [])
+
     def test_tag_detail_exposes_flarum_camel_case_base_fields(self):
         self.public_tag.default_sort = "latest"
         self.public_tag.discussion_count = 3
