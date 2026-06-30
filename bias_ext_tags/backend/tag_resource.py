@@ -355,12 +355,12 @@ class TagResource(DatabaseResource):
         from bias_ext_tags.backend.services import TagService
         from bias_ext_tags.backend.events import TagSavedEvent
 
-        original_values = _capture_tag_persisted_values(instance)
+        original_values = capture_tag_persisted_values(instance)
         instance = self.saving(instance, context) or instance
         payload = _service_payload_from_instance(instance, context, creating=False)
         payload.update(_changed_tag_lifecycle_values(instance, original_values))
         saved_tag = TagService.update_tag(tag_id=instance.id, user=context.get("user"), **payload)
-        changed_fields = _changed_tag_lifecycle_field_names(saved_tag, original_values)
+        changed_fields = changed_tag_lifecycle_field_names(saved_tag, original_values)
         if changed_fields:
             _dispatch_tag_lifecycle_event(
                 TagSavedEvent(saved_tag, context.get("user"), _request_body(context), changed_fields=changed_fields)
@@ -600,7 +600,7 @@ def _capture_tag_lifecycle_values(tag) -> dict:
     }
 
 
-def _capture_tag_persisted_values(tag) -> dict:
+def capture_tag_persisted_values(tag) -> dict:
     from bias_ext_tags.backend.models import Tag
 
     tag_id = getattr(tag, "id", None)
@@ -620,7 +620,7 @@ def _changed_tag_lifecycle_values(tag, original_values: dict) -> dict:
     return changed
 
 
-def _changed_tag_lifecycle_field_names(tag, original_values: dict) -> tuple[str, ...]:
+def changed_tag_lifecycle_field_names(tag, original_values: dict) -> tuple[str, ...]:
     return tuple(
         sorted(
             _TAG_LIFECYCLE_SERVICE_FIELDS[field]

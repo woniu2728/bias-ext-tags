@@ -6603,6 +6603,56 @@ class AdminTagManagementApiTests(TestCase):
         self.assertEqual(created_tag.default_sort, "top")
         self.assertEqual(created_tag.reply_scope, "staff")
 
+    def test_admin_tag_api_writes_flarum_style_lifecycle_audit_logs(self):
+        create_response = self.client.post(
+            "/api/admin/tags",
+            data=json.dumps({
+                "name": "后台审计标签",
+                "slug": "admin-audit-tag",
+            }),
+            content_type="application/json",
+            **self.auth_header(),
+        )
+
+        self.assertEqual(create_response.status_code, 200, create_response.content)
+        tag_id = create_response.json()["id"]
+        update_response = self.client.put(
+            f"/api/admin/tags/{tag_id}",
+            data=json.dumps({"name": "后台审计标签更新"}),
+            content_type="application/json",
+            **self.auth_header(),
+        )
+        delete_response = self.client.delete(
+            f"/api/admin/tags/{tag_id}",
+            **self.auth_header(),
+        )
+
+        self.assertEqual(update_response.status_code, 200, update_response.content)
+        self.assertEqual(delete_response.status_code, 200, delete_response.content)
+        self.assertEqual(AuditLog.objects.filter(action="admin.tag.create", target_id=tag_id).count(), 1)
+        self.assertEqual(AuditLog.objects.filter(action="admin.tag.update", target_id=tag_id).count(), 1)
+        self.assertEqual(AuditLog.objects.filter(action="admin.tag.delete", target_id=tag_id).count(), 1)
+
+        created_log = AuditLog.objects.get(action="tag.created", target_id=tag_id)
+        updated_log = AuditLog.objects.get(action="tag.updated", target_id=tag_id)
+        deleted_log = AuditLog.objects.get(action="tag.deleted", target_id=tag_id)
+        self.assertEqual(created_log.user_id, self.admin.id)
+        self.assertEqual(created_log.data["tag_id"], tag_id)
+        self.assertEqual(updated_log.data["changed_fields"], ["name"])
+        self.assertEqual(deleted_log.data["slug"], "admin-audit-tag")
+
+    def test_admin_tag_api_noop_update_does_not_write_flarum_style_update_audit(self):
+        response = self.client.put(
+            f"/api/admin/tags/{self.parent_tag.id}",
+            data=json.dumps({"name": self.parent_tag.name}),
+            content_type="application/json",
+            **self.auth_header(),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(AuditLog.objects.filter(action="admin.tag.update", target_id=self.parent_tag.id).count(), 1)
+        self.assertFalse(AuditLog.objects.filter(action="tag.updated", target_id=self.parent_tag.id).exists())
+
     def test_admin_tag_api_rejects_slug_with_slash_or_space(self):
         slash_response = self.client.post(
             "/api/admin/tags",

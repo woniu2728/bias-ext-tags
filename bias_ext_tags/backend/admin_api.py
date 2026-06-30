@@ -4,10 +4,16 @@ from django.shortcuts import get_object_or_404
 
 from bias_core.extensions.platform import AccessTokenAuth
 from bias_core.extensions.platform import api_error
+from bias_core.extensions.platform import get_runtime_forum_event_bus
 from bias_core.extensions.platform import log_admin_action
 from bias_core.extensions.platform import require_staff
+from bias_ext_tags.backend.events import TagCreatedEvent, TagDeletingEvent, TagSavedEvent
 from bias_ext_tags.backend.models import Tag
 from bias_ext_tags.backend.services import TagService
+from bias_ext_tags.backend.tag_resource import (
+    capture_tag_persisted_values,
+    changed_tag_lifecycle_field_names,
+)
 
 
 router = Router()
@@ -138,6 +144,7 @@ def create_admin_tag(request, payload: dict = Body(...)):
             user=request.auth,
         )
         tag = Tag.objects.select_related("parent").get(id=tag.id)
+        _dispatch_tag_lifecycle_event(TagCreatedEvent(tag, request.auth, _admin_lifecycle_payload(normalized)))
         log_admin_action(
             request,
             "admin.tag.create",
@@ -187,7 +194,8 @@ def update_admin_tag(request, tag_id: int, payload: dict = Body(...)):
         return denied
 
     try:
-        get_object_or_404(Tag, id=tag_id)
+        original_tag = get_object_or_404(Tag, id=tag_id)
+        original_values = capture_tag_persisted_values(original_tag)
         normalized = normalize_optional_tag_parent(payload)
         update_payload = {}
 
@@ -224,6 +232,11 @@ def update_admin_tag(request, tag_id: int, payload: dict = Body(...)):
             update_payload["reply_scope"] = normalized.get("reply_scope")
         tag = update_runtime_tag(tag_id, request.auth, **update_payload)
         tag = Tag.objects.select_related("parent").get(id=tag.id)
+        changed_fields = changed_tag_lifecycle_field_names(tag, original_values)
+        if changed_fields:
+            _dispatch_tag_lifecycle_event(
+                TagSavedEvent(tag, request.auth, _admin_lifecycle_payload(normalized), changed_fields=changed_fields)
+            )
         log_admin_action(
             request,
             "admin.tag.update",
@@ -278,6 +291,7 @@ def delete_admin_tag(request, tag_id: int):
     try:
         tag = get_object_or_404(Tag, id=tag_id)
         tag_snapshot = {"name": tag.name, "slug": tag.slug, "parent_id": tag.parent_id}
+        _dispatch_tag_lifecycle_event(TagDeletingEvent(tag, request.auth))
         delete_runtime_tag(tag_id, request.auth)
         log_admin_action(
             request,
@@ -308,3 +322,12 @@ def refresh_admin_tag_stats(request):
         },
     )
     return result
+
+
+def _dispatch_tag_lifecycle_event(event) -> None:
+    get_runtime_forum_event_bus().dispatch(event)
+
+
+def _admin_lifecycle_payload(payload: dict) -> dict:
+    return {"data": {"attributes": dict(payload or {})}}
+
