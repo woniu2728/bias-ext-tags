@@ -126,6 +126,14 @@ def tag_resource_field_definitions():
         ),
         ResourceFieldDefinition(
             resource="tag",
+            field="last_posted_user",
+            module_id=EXTENSION_ID,
+            resolver=resolve_tag_last_posted_user,
+            description="标签下最后活跃用户摘要。",
+            select_related=("last_posted_user",),
+        ),
+        ResourceFieldDefinition(
+            resource="tag",
             field="state",
             module_id=EXTENSION_ID,
             resolver=resolve_tag_state,
@@ -145,6 +153,15 @@ def tag_resource_relationship_definitions():
             description="标签下最后活跃讨论资源。",
             select_related=("last_posted_discussion",),
             resource_type="discussion",
+        ),
+        ResourceRelationshipDefinition(
+            resource="tag",
+            relationship="last_posted_user",
+            module_id=EXTENSION_ID,
+            resolver=resolve_tag_last_posted_user_resource,
+            description="标签下最后活跃用户资源。",
+            select_related=("last_posted_user",),
+            resource_type="user_detail",
         ),
     )
 
@@ -287,7 +304,7 @@ def resolve_forum_tags(forum, context: dict) -> list[dict]:
     user = context.get("user")
     primary_queryset = filter_runtime_tags_for_user(
         Tag.objects.filter(parent__isnull=True, position__isnull=False, is_hidden=False)
-        .select_related("last_posted_discussion", "parent")
+        .select_related("last_posted_discussion", "last_posted_user", "parent")
         .order_by(*TagService.structure_order_by()),
         user,
         action="view",
@@ -297,7 +314,7 @@ def resolve_forum_tags(forum, context: dict) -> list[dict]:
 
     secondary_queryset = filter_runtime_tags_for_user(
         Tag.objects.filter(parent__isnull=True, position__isnull=True, is_hidden=False)
-        .select_related("last_posted_discussion", "parent")
+        .select_related("last_posted_discussion", "last_posted_user", "parent")
         .order_by("-discussion_count", "name"),
         user,
         action="view",
@@ -344,7 +361,7 @@ def resolve_post_event_mentions_tags(post, context: dict | None = None) -> list[
 
     tags_by_slug = {
         tag.slug: tag
-        for tag in Tag.objects.filter(slug__in=slugs).select_related("last_posted_discussion")
+        for tag in Tag.objects.filter(slug__in=slugs).select_related("last_posted_discussion", "last_posted_user")
     }
     return [tags_by_slug[slug] for slug in slugs if slug in tags_by_slug]
 
@@ -392,6 +409,16 @@ def resolve_tag_last_posted_discussion(tag, context: dict) -> dict | None:
 
 def resolve_tag_last_posted_discussion_resource(tag, context: dict):
     return getattr(tag, "last_posted_discussion", None)
+
+
+def resolve_tag_last_posted_user(tag, context: dict) -> dict | None:
+    from bias_core.extensions.runtime import serialize_runtime_user
+
+    return serialize_runtime_user(getattr(tag, "last_posted_user", None), resource="user_summary", context=context)
+
+
+def resolve_tag_last_posted_user_resource(tag, context: dict):
+    return getattr(tag, "last_posted_user", None)
 
 
 def resolve_tag_parent(tag, context: dict):
@@ -473,9 +500,11 @@ def _serialize_forum_tag(tag, context: dict, include_children: bool = True) -> d
     payload["can_add_to_discussion"] = resolve_tag_can_add_to_discussion(tag, context)
     payload["can_reply"] = resolve_tag_can_reply(tag, context)
     payload["last_posted_discussion"] = resolve_tag_last_posted_discussion(tag, context)
+    payload["last_posted_user"] = resolve_tag_last_posted_user(tag, context)
     payload["canStartDiscussion"] = payload["can_start_discussion"]
     payload["canAddToDiscussion"] = payload["can_add_to_discussion"]
     payload["lastPostedDiscussion"] = payload["last_posted_discussion"]
+    payload["lastPostedUser"] = payload["last_posted_user"]
     children = getattr(tag, "visible_children", []) if include_children else []
     payload["children"] = [
         _serialize_forum_tag(child, context, include_children=False)

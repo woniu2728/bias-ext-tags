@@ -97,7 +97,7 @@ def enrich_realtime_tags_included_payload(*, discussion=None, post_payload=None,
             return {}
         from bias_ext_tags.backend.models import Tag
 
-        for tag in Tag.objects.select_related("last_posted_discussion").filter(id__in=tag_ids):
+        for tag in Tag.objects.select_related("last_posted_discussion", "last_posted_user").filter(id__in=tag_ids):
             _merge_tag_payload(tags, tag)
     if not tags:
         return {}

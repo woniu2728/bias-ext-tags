@@ -1400,6 +1400,7 @@ class TagService:
         ).update(
             last_posted_at=discussion.last_posted_at,
             last_posted_discussion_id=discussion.id,
+            last_posted_user_id=getattr(discussion, "last_posted_user_id", None),
         )
 
     @staticmethod
@@ -1563,6 +1564,7 @@ class TagService:
                 "tag_id",
                 "discussion_id",
                 "discussion__last_posted_at",
+                "discussion__last_posted_user_id",
             )
         }
 
@@ -1571,9 +1573,10 @@ class TagService:
             tag.discussion_count = int(discussion_counts.get(tag.id) or 0)
             tag.last_posted_at = latest_discussion["discussion__last_posted_at"] if latest_discussion else None
             tag.last_posted_discussion_id = latest_discussion["discussion_id"] if latest_discussion else None
+            tag.last_posted_user_id = latest_discussion["discussion__last_posted_user_id"] if latest_discussion else None
 
         Tag.objects.bulk_update(
             tags,
-            ["discussion_count", "last_posted_at", "last_posted_discussion"],
+            ["discussion_count", "last_posted_at", "last_posted_discussion", "last_posted_user"],
         )
 

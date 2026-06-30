@@ -33,12 +33,12 @@ def tag_endpoint_specs() -> tuple[ResourceEndpoint, ...]:
         .with_handler(dispatch_tag_popular),
         ResourceEndpoint.show()
         .at("/tags/{object_id}", absolute=True)
-        .select_related_with("last_posted_discussion", "parent")
+        .select_related_with("last_posted_discussion", "last_posted_user", "parent")
         .can("view")
         .plain_response(core_show_tag_response),
         ResourceEndpoint.show("show-by-slug")
         .at("/tags/slug/{object_id}", absolute=True)
-        .select_related_with("last_posted_discussion", "parent")
+        .select_related_with("last_posted_discussion", "last_posted_user", "parent")
         .can("view")
         .plain_response(core_show_tag_response),
         ResourceEndpoint.update()
@@ -126,6 +126,8 @@ class TagResource(DatabaseResource):
             ResourceField("lastPostedAt", resolver=lambda tag, context: tag.last_posted_at, module_id=EXTENSION_ID),
             ResourceField("lastPostedDiscussion", resolver=_resolve_tag_last_posted_discussion_summary, module_id=EXTENSION_ID)
             .plain_only(),
+            ResourceField("lastPostedUser", resolver=_resolve_tag_last_posted_user_summary, module_id=EXTENSION_ID)
+            .plain_only(),
             ResourceField("canStartDiscussion", resolver=_resolve_tag_can_start_discussion, module_id=EXTENSION_ID)
             .boolean(),
             ResourceField("canAddToDiscussion", resolver=_resolve_tag_can_add_to_discussion, module_id=EXTENSION_ID)
@@ -188,6 +190,8 @@ class TagResource(DatabaseResource):
             .prefetch_to("visible_children"),
             ResourceRelationship("lastPostedDiscussion", resolver=_resolve_tag_last_posted_discussion, module_id=EXTENSION_ID)
             .to_one("discussion"),
+            ResourceRelationship("lastPostedUser", resolver=_resolve_tag_last_posted_user, module_id=EXTENSION_ID)
+            .to_one("user_detail"),
         ]
 
     def query(self, context):
@@ -222,7 +226,7 @@ class TagResource(DatabaseResource):
         context["discussion_tag_ids"] = discussion_tag_ids
         context.setdefault("_tag_cache", {})
 
-        queryset = Tag.objects.select_related("last_posted_discussion", "parent").all()
+        queryset = Tag.objects.select_related("last_posted_discussion", "last_posted_user", "parent").all()
         if children_requested:
             queryset = queryset.prefetch_related(
                 Prefetch(
@@ -299,7 +303,7 @@ class TagResource(DatabaseResource):
             if plan.select_related:
                 queryset = queryset.select_related(*plan.select_related)
         else:
-            queryset = queryset.select_related("last_posted_discussion", "parent")
+            queryset = queryset.select_related("last_posted_discussion", "last_posted_user", "parent")
         return TagService.prefetch_state_for_user(queryset, context.get("user"))
 
     def can(self, user, ability: str, instance, context) -> bool:
@@ -438,7 +442,7 @@ def _resolve_tag_children(tag, context):
 def _scope_tag_children_relationship(queryset, context):
     from bias_ext_tags.backend.services import TagService
 
-    output = queryset.select_related("last_posted_discussion").order_by(*TagService.child_order_by())
+    output = queryset.select_related("last_posted_discussion", "last_posted_user").order_by(*TagService.child_order_by())
     if not context.get("include_hidden"):
         output = output.filter(is_hidden=False)
     output = TagService.filter_tags_for_user(
@@ -462,6 +466,18 @@ def _resolve_tag_last_posted_discussion_summary(tag, context):
     from bias_ext_tags.backend.resources import resolve_tag_last_posted_discussion
 
     return resolve_tag_last_posted_discussion(tag, context)
+
+
+def _resolve_tag_last_posted_user(tag, context):
+    from bias_ext_tags.backend.resources import resolve_tag_last_posted_user_resource
+
+    return resolve_tag_last_posted_user_resource(tag, context)
+
+
+def _resolve_tag_last_posted_user_summary(tag, context):
+    from bias_ext_tags.backend.resources import resolve_tag_last_posted_user
+
+    return resolve_tag_last_posted_user(tag, context)
 
 
 def _tag_restriction_writable(tag, context) -> bool:

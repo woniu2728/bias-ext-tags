@@ -885,6 +885,7 @@ class TagStatsTests(ExtensionRuntimeTestMixin, TestCase):
 
         self.assertEqual(self.tag.discussion_count, 2)
         self.assertIsNotNone(self.tag.last_posted_discussion)
+        self.assertEqual(self.tag.last_posted_user_id, self.user.id)
         refresh_tag_stats.assert_not_called()
         self.assertFalse(any(isinstance(event, TagStatsRefreshRequestedEvent) for event in events))
 
@@ -956,6 +957,7 @@ class TagStatsTests(ExtensionRuntimeTestMixin, TestCase):
             tag.refresh_from_db()
             self.assertEqual(tag.discussion_count, 2)
             self.assertEqual(tag.last_posted_discussion_id, discussions_by_tag[tag.id].id)
+            self.assertEqual(tag.last_posted_user_id, self.user.id)
 
         per_tag_link_queries = [
             query["sql"]
@@ -1003,6 +1005,7 @@ class TagStatsTests(ExtensionRuntimeTestMixin, TestCase):
         self.tag.refresh_from_db()
         self.assertEqual(self.tag.discussion_count, 0)
         self.assertIsNone(self.tag.last_posted_discussion)
+        self.assertIsNone(self.tag.last_posted_user)
 
         with patch("bias_ext_tags.backend.services.TagService.refresh_tag_stats") as refresh_tag_stats:
             with patch("bias_ext_tags.backend.listeners.refresh_runtime_discussion_tag_stats") as refresh_discussion_tag_stats:
@@ -1011,6 +1014,7 @@ class TagStatsTests(ExtensionRuntimeTestMixin, TestCase):
         self.tag.refresh_from_db()
         self.assertEqual(self.tag.discussion_count, 1)
         self.assertEqual(self.tag.last_posted_discussion_id, discussion.id)
+        self.assertEqual(self.tag.last_posted_user_id, self.user.id)
         refresh_tag_stats.assert_not_called()
         refresh_discussion_tag_stats.assert_not_called()
 
@@ -2328,6 +2332,8 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertTrue(payload["can_reply"])
         self.assertEqual(payload["last_posted_discussion"]["id"], discussion.id)
         self.assertEqual(payload["lastPostedDiscussion"]["id"], discussion.id)
+        self.assertEqual(payload["last_posted_user"]["id"], self.admin.id)
+        self.assertEqual(payload["lastPostedUser"]["id"], self.admin.id)
 
     def test_tag_detail_can_return_flarum_jsonapi_document_when_requested(self):
         child = Tag.objects.create(
@@ -2421,6 +2427,8 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertNotIn("canAddToDiscussion", payload)
         self.assertNotIn("last_posted_discussion", payload)
         self.assertNotIn("lastPostedDiscussion", payload)
+        self.assertNotIn("last_posted_user", payload)
+        self.assertNotIn("lastPostedUser", payload)
 
     def test_tag_detail_supports_flarum_last_posted_discussion_include_name(self):
         discussion = create_runtime_discussion(
@@ -2444,6 +2452,28 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(payload["lastPostedDiscussion"]["id"], discussion.id)
         self.assertEqual(payload["lastPostedDiscussion"]["last_post_number"], discussion.last_post_number)
         self.assertNotIn("user", payload["lastPostedDiscussion"])
+
+    def test_tag_detail_supports_flarum_last_posted_user_include_name(self):
+        create_runtime_discussion(
+            title="标签 camelCase include 用户",
+            content="用于 include",
+            user=self.admin,
+            extension_payload=discussion_tags_payload([self.members_tag.id]),
+        )
+        TagService.refresh_tag_stats([self.members_tag.id])
+
+        response = self.client.get(
+            f"/api/tags/{self.members_tag.id}",
+            {"fields[tag]": "can_reply", "include": "lastPostedUser"},
+            **self.auth_header(self.admin),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertIn("can_reply", payload)
+        self.assertIn("lastPostedUser", payload)
+        self.assertEqual(payload["lastPostedUser"]["id"], self.admin.id)
+        self.assertEqual(payload["lastPostedUser"]["username"], self.admin.username)
 
     def test_tag_delete_can_return_flarum_jsonapi_no_content_when_requested(self):
         tag = Tag.objects.create(name="JSONAPI 删除", slug="jsonapi-delete")
@@ -3062,8 +3092,8 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(endpoints["index"].kind, "index")
         self.assertEqual(endpoints["show-by-slug"].kind, "show")
         self.assertEqual(endpoints["show-by-slug"].ability, "view")
-        self.assertEqual(endpoints["show"].select_related, ("last_posted_discussion", "parent"))
-        self.assertEqual(endpoints["show-by-slug"].select_related, ("last_posted_discussion", "parent"))
+        self.assertEqual(endpoints["show"].select_related, ("last_posted_discussion", "last_posted_user", "parent"))
+        self.assertEqual(endpoints["show-by-slug"].select_related, ("last_posted_discussion", "last_posted_user", "parent"))
         self.assertEqual(endpoints["update"].kind, "update")
         self.assertIsNone(endpoints["index"].response_callback)
         self.assertFalse(endpoints["index"].response_callback_only)
@@ -3119,6 +3149,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertTrue(callable(relationships["children"].scope_callback))
         self.assertEqual(relationships["children"].prefetch_to_attr, "visible_children")
         self.assertEqual(relationships["lastPostedDiscussion"].resource_type, "discussion")
+        self.assertEqual(relationships["lastPostedUser"].resource_type, "user_detail")
 
     def test_tag_resource_payload_applies_flarum_writable_fields_and_parent_relationship(self):
         registry = ResourceRegistry()
@@ -3618,6 +3649,9 @@ class TagForumSettingsTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertTrue(
             all(item["last_posted_discussion"] for item in payload_tags)
         )
+        self.assertTrue(
+            all(item["last_posted_user"] for item in payload_tags)
+        )
         tag_discussion_fetches = [
             query["sql"]
             for query in queries
@@ -3628,6 +3662,17 @@ class TagForumSettingsTests(ExtensionRuntimeTestMixin, TestCase):
             tag_discussion_fetches,
             [],
             "Forum tag summary should not issue per-tag last_posted_discussion lookups.",
+        )
+        tag_user_fetches = [
+            query["sql"]
+            for query in queries
+            if 'from "users"' in query["sql"].lower()
+            and 'where "users"."id" =' in query["sql"].lower()
+        ]
+        self.assertLessEqual(
+            len(tag_user_fetches),
+            1,
+            "Forum tag summary should not issue per-tag last_posted_user lookups.",
         )
         tag_parent_fetches = [
             query["sql"]

@@ -27,6 +27,7 @@ def build_tag_serialize_context(user=None, action="view"):
         "_tag_cache": {},
         "plain_related_fields": {
             "discussion": ("id", "title", "slug", "last_post_number", "last_posted_at"),
+            "user_detail": ("id", "username", "display_name", "avatar_url"),
         },
     }
 
@@ -83,6 +84,7 @@ def jsonapi_serialize_context(context, *, action="view") -> dict:
         "default_include": tuple(context.get("default_include") or ()),
         "plain_related_fields": {
             "discussion": ("id", "title", "slug", "last_post_number", "last_posted_at"),
+            "user_detail": ("id", "username", "display_name", "avatar_url"),
         },
     })
     return output
