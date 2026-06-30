@@ -22,6 +22,7 @@ from bias_core.extensions.testing import (
     ExtensionRegistry,
     ExtensionRuntimeTestMixin,
     ResourceRegistry,
+    assert_runtime_service_contracts,
     bootstrap_extension_application,
     build_runtime_event,
     can_view_model_instance,
@@ -257,6 +258,7 @@ class TagsExtensionRuntimeTests(ExtensionRuntimeTestMixin, TestCase):
         application = self.bootstrap_extensions("tags")
         service = application.get_service("tags.service")
 
+        assert_runtime_service_contracts(application, "tags", "tags.service")
         self.assertIn("tags.service", application.get_service_provider_keys(extension_id="tags"))
         self.assertEqual(service["model"].__name__, "Tag")
         self.assertEqual(service["state_model"].__name__, "TagState")
