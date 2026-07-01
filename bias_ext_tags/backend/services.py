@@ -1,4 +1,5 @@
 import uuid
+import time
 from typing import Any, Optional, List
 from django.db import transaction
 from django.db.models import Count, F, Max, Prefetch, Q, QuerySet, Value, Window
@@ -17,16 +18,40 @@ from bias_ext_tags.backend.tag_relationships import (
 _UNSET = object()
 
 
-def _has_runtime_forum_permission(user, ability: str) -> bool:
-    from bias_core.extensions.runtime import has_runtime_forum_permission
+def _get_runtime_service(service_key: str, default=None):
+    from bias_core.extensions.runtime import get_runtime_service
 
-    return has_runtime_forum_permission(user, ability)
+    return get_runtime_service(service_key, default)
+
+
+def _runtime_service_method(service_key: str, name: str):
+    service = _get_runtime_service(service_key)
+    if isinstance(service, dict):
+        method = service.get(name)
+    else:
+        method = getattr(service, name, None)
+    if not callable(method):
+        raise RuntimeError(f"Tags 扩展运行时服务缺少方法: {service_key}.{name}")
+    return method
+
+
+def _runtime_service_value(service_key: str, name: str):
+    service = _get_runtime_service(service_key)
+    if isinstance(service, dict):
+        value = service.get(name)
+    else:
+        value = getattr(service, name, None)
+    if value is None:
+        raise RuntimeError(f"Tags 扩展运行时服务缺少值: {service_key}.{name}")
+    return value
+
+
+def _has_runtime_forum_permission(user, ability: str) -> bool:
+    return bool(_runtime_service_method("users.service", "has_forum_permission")(user, ability))
 
 
 def _get_runtime_forum_permissions(user):
-    from bias_core.extensions.runtime import get_runtime_forum_permissions
-
-    return get_runtime_forum_permissions(user)
+    return _runtime_service_method("users.service", "get_forum_permissions")(user)
 
 
 def _get_runtime_forum_permission_snapshot(user) -> tuple[str, ...]:
@@ -56,9 +81,7 @@ def _get_runtime_forum_permission_snapshot(user) -> tuple[str, ...]:
 
 
 def _get_runtime_permission_model():
-    from bias_core.extensions.runtime import get_runtime_permission_model
-
-    return get_runtime_permission_model()
+    return _runtime_service_value("users.service", "permission_model")
 
 
 def _generate_runtime_model_slug(model, name, **kwargs):
@@ -80,9 +103,7 @@ def _to_runtime_model_slug(model, instance, **kwargs):
 
 
 def _apply_runtime_counted_discussion_filter(queryset, **kwargs):
-    from bias_core.extensions.runtime import apply_runtime_counted_discussion_filter
-
-    return apply_runtime_counted_discussion_filter(queryset, **kwargs)
+    return _runtime_service_method("content.discussions", "apply_counted_filter")(queryset, **kwargs)
 
 
 class TagService:
@@ -1582,11 +1603,12 @@ class TagService:
         from bias_ext_tags.backend.tasks import refresh_tag_stats_task
 
         def fallback():
-            TagService.refresh_tag_stats(normalized_tag_ids)
+            metrics = TagService.refresh_tag_stats(normalized_tag_ids)
             return {
                 "mode": "sync",
                 "tag_ids": normalized_tag_ids,
                 "message": "标签统计已同步刷新",
+                "metrics": metrics,
             }
 
         if QueueService.should_enqueue():
@@ -1611,7 +1633,7 @@ class TagService:
         )
 
     @staticmethod
-    def refresh_tag_stats(tag_ids: Optional[List[int]] = None) -> None:
+    def refresh_tag_stats(tag_ids: Optional[List[int]] = None) -> dict:
         """
         重新计算标签讨论数和最后发帖讨论。
 
@@ -1621,9 +1643,14 @@ class TagService:
         if tag_ids is not None:
             queryset = queryset.filter(id__in=tag_ids)
 
+        started_at = time.perf_counter()
         tags = list(queryset)
         if not tags:
-            return
+            return {
+                "refreshed_count": 0,
+                "duration_ms": 0.0,
+                "batched": True,
+            }
 
         target_tag_ids = [tag.id for tag in tags]
         counted_links = _apply_runtime_counted_discussion_filter(
@@ -1664,4 +1691,9 @@ class TagService:
             tags,
             ["discussion_count", "last_posted_at", "last_posted_discussion", "last_posted_user"],
         )
+        return {
+            "refreshed_count": len(tags),
+            "duration_ms": round((time.perf_counter() - started_at) * 1000, 3),
+            "batched": True,
+        }
 

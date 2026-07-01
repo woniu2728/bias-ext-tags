@@ -22,10 +22,21 @@ TAG_AUDIT_METADATA_FIELDS = {
 }
 
 
-def create_runtime_timeline_from_builder(*args, **kwargs):
-    from bias_core.extensions.runtime import create_runtime_timeline_from_builder as runtime_create_timeline_from_builder
+def _get_runtime_service(service_key: str, default=None):
+    from bias_core.extensions.runtime import get_runtime_service
 
-    return runtime_create_timeline_from_builder(*args, **kwargs)
+    return get_runtime_service(service_key, default)
+
+
+def _runtime_service_method(service_key: str, name: str):
+    service = _get_runtime_service(service_key)
+    if isinstance(service, dict):
+        method = service.get(name)
+    else:
+        method = getattr(service, name, None)
+    if not callable(method):
+        raise RuntimeError(f"Tags 扩展运行时服务缺少方法: {service_key}.{name}")
+    return method
 
 
 def refresh_runtime_discussion_tag_stats(*args, **kwargs):
@@ -164,7 +175,7 @@ def handle_discussion_approved_tag_stats(event) -> None:
 
 def handle_discussion_tagged(event: DiscussionTaggedEvent) -> None:
     log_discussion_tagged_audit(event)
-    create_runtime_timeline_from_builder(
+    _runtime_service_method("discussions.timeline", "create_from_builder")(
         event,
         "discussion_tagged",
         extra={"post_type": "discussionTagged"},
@@ -287,4 +298,3 @@ def handle_tag_deleted_audit(event: TagDeletingEvent) -> None:
         target_id=getattr(tag, "id", None),
         data={"tag_id": getattr(tag, "id", None), "slug": getattr(tag, "slug", "")},
     )
-

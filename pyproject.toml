@@ -3,6 +3,8 @@ name = "bias-ext-tags"
 version = "0.1.0"
 dependencies = [
   "bias-core>=0.1,<0.2",
+  "bias-ext-users>=0.1,<0.2",
+  "bias-content>=0.1,<0.2",
 ]
 
 [project.entry-points."bias.extensions"]
@@ -37,13 +39,15 @@ include = ["bias_ext_tags*"]
   "frontend/forum/index.js",
   "frontend/forum/nodeSdk.js",
   "frontend/forum/sdk.js",
+  "frontend/forum/tagListState.js",
+  "frontend/forum/tagListState.test.js",
   "frontend/forum/tagModel.js",
   "frontend/forum/tagSearchSource.js",
   "frontend/forum/tagSearchSource.test.js",
-  "frontend/forum/tagListState.js",
-  "frontend/forum/tagListState.test.js",
   "frontend/forum/tagSelectionState.js",
   "frontend/forum/tagSelectionState.test.js",
+  "frontend/forum/tagTreeRequest.js",
+  "frontend/forum/tagTreeRequest.test.js",
   "frontend/forum/tagUtils.js",
   "frontend/forum/tagUtils.test.js",
   "frontend/forum/tagsMeta.js",
@@ -64,5 +68,5 @@ include = ["bias_ext_tags*"]
   "frontend/forum/useTagsViewModel.js",
 ]
 
-[tool.pytest.ini_options]
-DJANGO_SETTINGS_MODULE = "bias_core.extension_test_settings"
+[tool.pytest."ini_options"]
+"DJANGO_SETTINGS_MODULE" = "bias_core.extension_test_settings"

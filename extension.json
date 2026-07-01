@@ -28,6 +28,20 @@
     "auto_install": true,
     "auto_enable": true
   },
+  "performance_contracts": [
+    {
+      "name": "tag_stats_refresh",
+      "message": "tag stats refresh exposes batched implementation and duration metrics.",
+      "metrics": {
+        "refreshed_count": "int",
+        "duration_ms": "float",
+        "batched": true
+      },
+      "tests": [
+        "bias_ext_tags.backend.tests.TagExtensionTests.test_refresh_tag_stats_batches_counts_and_latest_discussions"
+      ]
+    }
+  ],
   "security": {
     "capabilities_notice": "Taxonomy extension; owns tag records and controls tag visibility, assignment, and navigation surfaces."
   }

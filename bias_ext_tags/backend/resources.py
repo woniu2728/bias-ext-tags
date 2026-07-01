@@ -4,10 +4,27 @@ from bias_core.extensions import (
     ResourceFieldDefinition,
     ResourceRelationshipDefinition,
 )
-from bias_core.extensions.platform import wants_jsonapi_response
+from bias_core.extensions.platform import get_extension_settings, wants_jsonapi_response
 from bias_ext_tags.backend.constants import EXTENSION_ID
 from bias_ext_tags.backend.models import Tag
 from bias_ext_tags.backend.tag_resource import TagResource
+
+
+def _get_runtime_service(service_key: str, default=None):
+    from bias_core.extensions.runtime import get_runtime_service
+
+    return get_runtime_service(service_key, default)
+
+
+def _runtime_service_method(service_key: str, name: str):
+    service = _get_runtime_service(service_key)
+    if isinstance(service, dict):
+        method = service.get(name)
+    else:
+        method = getattr(service, name, None)
+    if not callable(method):
+        raise RuntimeError(f"Tags 扩展运行时服务缺少方法: {service_key}.{name}")
+    return method
 
 
 def tag_resource_definition():
@@ -251,10 +268,12 @@ def can_view_tag_admin_fields(context: dict) -> bool:
 
 
 def can_view_tag_stored_slug(tag, context: dict) -> bool:
-    from bias_core.extensions.runtime import has_runtime_forum_permission
-
     user = context.get("user")
-    return bool(user and getattr(user, "is_authenticated", False) and has_runtime_forum_permission(user, "tag.edit"))
+    return bool(
+        user
+        and getattr(user, "is_authenticated", False)
+        and _runtime_service_method("users.service", "has_forum_permission")(user, "tag.edit")
+    )
 
 
 def resolve_tag_state(tag, context: dict) -> dict | None:
@@ -289,12 +308,26 @@ def resolve_discussion_can_tag(discussion, context: dict) -> bool:
 
 def discussion_tags_required_on_create(discussion, context: dict) -> bool:
     user = context.get("user")
-    if not user or not getattr(user, "is_authenticated", False):
-        return True
 
-    from bias_core.extensions.runtime import has_runtime_forum_permission
+    if (
+        user
+        and getattr(user, "is_authenticated", False)
+        and _runtime_service_method("users.service", "has_forum_permission")(user, "bypassTagCounts")
+    ):
+        return False
 
-    return not has_runtime_forum_permission(user, "bypassTagCounts")
+    settings = get_extension_settings("tags")
+    return (
+        _settings_int(settings, "min_primary_tags") > 0
+        or _settings_int(settings, "min_secondary_tags") > 0
+    )
+
+
+def _settings_int(settings: dict, key: str, default: int = 0) -> int:
+    try:
+        return max(0, int(settings.get(key, default)))
+    except (TypeError, ValueError):
+        return default
 
 
 def resolve_forum_tags(forum, context: dict) -> list[dict]:
@@ -326,10 +359,8 @@ def resolve_forum_tags(forum, context: dict) -> list[dict]:
 
 
 def resolve_forum_can_bypass_tag_counts(forum, context: dict) -> bool:
-    from bias_core.extensions.runtime import has_runtime_forum_permission
-
     user = context.get("user")
-    return has_runtime_forum_permission(user, "bypassTagCounts")
+    return _runtime_service_method("users.service", "has_forum_permission")(user, "bypassTagCounts")
 
 
 def resolve_discussion_tagged_event_data(post, context: dict) -> dict | None:
@@ -412,9 +443,12 @@ def resolve_tag_last_posted_discussion_resource(tag, context: dict):
 
 
 def resolve_tag_last_posted_user(tag, context: dict) -> dict | None:
-    from bias_core.extensions.runtime import serialize_runtime_user
+    user = getattr(tag, "last_posted_user", None)
+    if not user:
+        return None
+    from bias_core.extensions.runtime import get_runtime_resource_registry
 
-    return serialize_runtime_user(getattr(tag, "last_posted_user", None), resource="user_summary", context=context)
+    return get_runtime_resource_registry().serialize("user_summary", user, context)
 
 
 def resolve_tag_last_posted_user_resource(tag, context: dict):

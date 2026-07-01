@@ -6,6 +6,23 @@ from bias_ext_tags.backend.constants import EXTENSION_ID
 from bias_ext_tags.backend.models import Tag
 
 
+def _get_runtime_service(service_key: str, default=None):
+    from bias_core.extensions.runtime import get_runtime_service
+
+    return get_runtime_service(service_key, default)
+
+
+def _runtime_service_method(service_key: str, name: str):
+    service = _get_runtime_service(service_key)
+    if isinstance(service, dict):
+        method = service.get(name)
+    else:
+        method = getattr(service, name, None)
+    if not callable(method):
+        raise RuntimeError(f"Tags 扩展运行时服务缺少方法: {service_key}.{name}")
+    return method
+
+
 def tag_endpoint_specs() -> tuple[ResourceEndpoint, ...]:
     from bias_ext_tags.backend.responses import (
         dispatch_tag_popular,
@@ -310,11 +327,14 @@ class TagResource(DatabaseResource):
     def can(self, user, ability: str, instance, context) -> bool:
         from django.core.exceptions import PermissionDenied
 
-        from bias_core.extensions.runtime import has_runtime_forum_permission
         from bias_ext_tags.backend.services import TagService
 
         if ability in {"create", "createTag", "tag.create"}:
-            return bool(user and getattr(user, "is_authenticated", False) and has_runtime_forum_permission(user, "tag.create"))
+            return bool(
+                user
+                and getattr(user, "is_authenticated", False)
+                and _runtime_service_method("users.service", "has_forum_permission")(user, "tag.create")
+            )
         if ability in {"edit", "update", "tag.edit"}:
             return TagService.can_manage_tags(user, "tag.edit")
         if ability in {"delete", "tag.delete"}:

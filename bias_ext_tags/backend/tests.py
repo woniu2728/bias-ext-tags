@@ -349,7 +349,7 @@ class TagsExtensionRuntimeTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(endpoints["delete"].kind, "delete")
         self.assertEqual(endpoints["delete"].ability, "delete")
 
-    def test_tag_parent_relationship_declares_flarum_writable_condition(self):
+    def test_tag_parent_relationship_declares_jsonapi_writable_condition(self):
         application = self.bootstrap_extensions("tags")
         relationships = {
             relationship.relationship: relationship
@@ -956,13 +956,16 @@ class TagStatsTests(ExtensionRuntimeTestMixin, TestCase):
         )
 
         with CaptureQueriesContext(connection) as queries:
-            TagService.refresh_tag_stats([tag.id for tag in tags])
+            metrics = TagService.refresh_tag_stats([tag.id for tag in tags])
 
         for tag in tags:
             tag.refresh_from_db()
             self.assertEqual(tag.discussion_count, 2)
             self.assertEqual(tag.last_posted_discussion_id, discussions_by_tag[tag.id].id)
             self.assertEqual(tag.last_posted_user_id, self.user.id)
+        self.assertEqual(metrics["refreshed_count"], 6)
+        self.assertTrue(metrics["batched"])
+        self.assertGreaterEqual(metrics["duration_ms"], 0)
 
         per_tag_link_queries = [
             query["sql"]
@@ -1529,7 +1532,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(delete_response.status_code, 200, delete_response.content)
         self.assertFalse(Tag.objects.filter(id=tag_id).exists())
 
-    def test_tag_write_resource_endpoints_dispatch_flarum_lifecycle_events(self):
+    def test_tag_write_resource_endpoints_dispatch_jsonapi_lifecycle_events(self):
         events, dispatch_patch = capture_runtime_events()
         with dispatch_patch:
             create_response = self.client.post(
@@ -1573,7 +1576,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(saved_events[0].changed_fields, ("name",))
         self.assertEqual(deleting_events[0].tag.id, tag_id)
 
-    def test_tag_write_resource_endpoints_write_flarum_style_audit_logs(self):
+    def test_tag_write_resource_endpoints_write_jsonapi_style_audit_logs(self):
         create_response = self.client.post(
             "/api/tags",
             data=json.dumps({"name": "审计资源标签", "slug": "audit-resource-tag"}),
@@ -1732,7 +1735,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(space_response.status_code, 422, space_response.content)
         self.assertFalse(Tag.objects.filter(name__in=["非法 slug 标签", "非法空白 slug 标签"]).exists())
 
-    def test_tag_resource_rejects_description_longer_than_flarum_limit(self):
+    def test_tag_resource_rejects_description_longer_than_jsonapi_limit(self):
         response = self.client.post(
             "/api/tags",
             data=json.dumps({
@@ -2143,7 +2146,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertIn("主标签", response.json()["error"])
         self.assertFalse(Tag.objects.filter(slug="invalid-secondary-child").exists())
 
-    def test_tag_create_and_update_accept_parent_relationship_payload_like_flarum(self):
+    def test_tag_create_and_update_accept_parent_relationship_payload_like_jsonapi(self):
         response = self.client.post(
             "/api/tags",
             data=json.dumps({
@@ -2211,7 +2214,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         tag = Tag.objects.get(slug="missing-type-tag")
         self.assertEqual(tag.parent_id, self.public_tag.id)
 
-    def test_tag_create_and_update_accept_camel_case_attributes_like_flarum(self):
+    def test_tag_create_and_update_accept_camel_case_attributes_like_jsonapi(self):
         response = self.client.post(
             "/api/tags",
             data=json.dumps({
@@ -2296,7 +2299,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         tag.refresh_from_db()
         self.assertIsNone(tag.parent_id)
 
-    def test_tag_api_rejects_read_only_flarum_default_sort_attribute(self):
+    def test_tag_api_rejects_read_only_jsonapi_default_sort_attribute(self):
         create_response = self.client.post(
             "/api/tags",
             data=json.dumps({
@@ -2334,7 +2337,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.public_tag.refresh_from_db()
         self.assertIsNone(self.public_tag.default_sort)
 
-    def test_tag_create_rejects_flarum_update_only_is_restricted_attribute(self):
+    def test_tag_create_rejects_jsonapi_update_only_is_restricted_attribute(self):
         response = self.client.post(
             "/api/tags",
             data=json.dumps({
@@ -2354,7 +2357,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(response.status_code, 403, response.content)
         self.assertFalse(Tag.objects.filter(slug="restricted-create").exists())
 
-    def test_tag_create_can_return_flarum_jsonapi_document_when_requested(self):
+    def test_tag_create_can_return_jsonapi_jsonapi_document_when_requested(self):
         response = self.client.post(
             "/api/tags",
             data=json.dumps({
@@ -2363,7 +2366,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
                     "attributes": {
                         "name": "JSONAPI 标签",
                         "slug": "jsonapi-tag",
-                        "description": "Flarum shape",
+                        "description": "JSONAPI shape",
                         "color": "#123456",
                     },
                 },
@@ -2378,7 +2381,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(data["type"], "tags")
         self.assertEqual(data["attributes"]["name"], "JSONAPI 标签")
         self.assertEqual(data["attributes"]["slug"], "jsonapi-tag")
-        self.assertEqual(data["attributes"]["description"], "Flarum shape")
+        self.assertEqual(data["attributes"]["description"], "JSONAPI shape")
         self.assertEqual(data["attributes"]["color"], "#123456")
         self.assertEqual(Tag.objects.get(slug="jsonapi-tag").name, "JSONAPI 标签")
 
@@ -2408,7 +2411,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(payload["last_posted_user"]["id"], self.admin.id)
         self.assertEqual(payload["lastPostedUser"]["id"], self.admin.id)
 
-    def test_tag_detail_can_return_flarum_jsonapi_document_when_requested(self):
+    def test_tag_detail_can_return_jsonapi_jsonapi_document_when_requested(self):
         child = Tag.objects.create(
             name="JSONAPI 子标签",
             slug="jsonapi-child",
@@ -2442,7 +2445,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         )
         self.assertEqual(payload["included"][0]["type"], "tags")
 
-    def test_tag_detail_jsonapi_supports_flarum_nested_parent_children_include(self):
+    def test_tag_detail_jsonapi_supports_jsonapi_nested_parent_children_include(self):
         first_child = Tag.objects.create(
             name="JSONAPI 嵌套子标签一",
             slug="jsonapi-nested-child-one",
@@ -2479,7 +2482,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
             [{"type": "tags", "id": str(first_child.id)}, {"type": "tags", "id": str(second_child.id)}],
         )
 
-    def test_tag_index_can_return_flarum_jsonapi_document_when_requested(self):
+    def test_tag_index_can_return_jsonapi_jsonapi_document_when_requested(self):
         child = Tag.objects.create(
             name="JSONAPI 子标签",
             slug="jsonapi-child-index",
@@ -2507,7 +2510,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
             {"public-tag", "members-tag"},
         )
 
-    def test_tag_index_filter_q_matches_flarum_prefix_search(self):
+    def test_tag_index_filter_q_matches_jsonapi_prefix_search(self):
         matched_by_name = Tag.objects.create(name="Support", slug="help")
         matched_by_slug = Tag.objects.create(name="Docs", slug="support-docs")
         Tag.objects.create(name="Community Support", slug="community-support")
@@ -2559,7 +2562,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(child_linkage, [{"type": "tags", "id": str(visible_child.id)}])
         self.assertIn(str(visible_child.id), {item["id"] for item in payload["data"]})
 
-    def test_tag_detail_exposes_flarum_camel_case_base_fields(self):
+    def test_tag_detail_exposes_jsonapi_camel_case_base_fields(self):
         self.public_tag.default_sort = "latest"
         self.public_tag.discussion_count = 3
         self.public_tag.is_hidden = True
@@ -2607,7 +2610,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertNotIn("last_posted_user", payload)
         self.assertNotIn("lastPostedUser", payload)
 
-    def test_tag_detail_supports_flarum_last_posted_discussion_include_name(self):
+    def test_tag_detail_supports_jsonapi_last_posted_discussion_include_name(self):
         discussion = create_runtime_discussion(
             title="标签 camelCase include 讨论",
             content="用于 include",
@@ -2630,7 +2633,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(payload["lastPostedDiscussion"]["last_post_number"], discussion.last_post_number)
         self.assertNotIn("user", payload["lastPostedDiscussion"])
 
-    def test_tag_detail_supports_flarum_last_posted_user_include_name(self):
+    def test_tag_detail_supports_jsonapi_last_posted_user_include_name(self):
         create_runtime_discussion(
             title="标签 camelCase include 用户",
             content="用于 include",
@@ -2652,7 +2655,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(payload["lastPostedUser"]["id"], self.admin.id)
         self.assertEqual(payload["lastPostedUser"]["username"], self.admin.username)
 
-    def test_tag_delete_can_return_flarum_jsonapi_no_content_when_requested(self):
+    def test_tag_delete_can_return_jsonapi_jsonapi_no_content_when_requested(self):
         tag = Tag.objects.create(name="JSONAPI 删除", slug="jsonapi-delete")
 
         response = self.client.delete(
@@ -2712,7 +2715,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertIsNotNone(payload["state"]["marked_as_read_at"])
         self.assertEqual(TagState.objects.get(tag=self.members_tag, user=self.member).id, marked_state.id)
 
-    def test_tag_detail_prefetches_actor_tag_state_like_flarum_show_scope(self):
+    def test_tag_detail_prefetches_actor_tag_state_like_jsonapi_show_scope(self):
         TagState.objects.create(
             tag=self.members_tag,
             user=self.member,
@@ -3280,7 +3283,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertTrue(callable(endpoints["update"].plain_response_callback))
         self.assertTrue(callable(endpoints["delete"].plain_response_callback))
 
-    def test_tag_resource_object_owns_flarum_writable_field_contract(self):
+    def test_tag_resource_object_owns_jsonapi_writable_field_contract(self):
         registry = ResourceRegistry()
         registry.register_resource(TagResource())
         jsonapi_request = RequestFactory().patch("/api/tags/1", HTTP_ACCEPT="application/vnd.api+json")
@@ -3328,7 +3331,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(relationships["lastPostedDiscussion"].resource_type, "discussion")
         self.assertEqual(relationships["lastPostedUser"].resource_type, "user_detail")
 
-    def test_tag_resource_payload_applies_flarum_writable_fields_and_parent_relationship(self):
+    def test_tag_resource_payload_applies_jsonapi_writable_fields_and_parent_relationship(self):
         registry = ResourceRegistry()
         registry.register_resource(TagResource())
         tag = Tag()
@@ -3378,7 +3381,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertTrue(tag.is_primary)
         self.assertEqual(tag.parent_id, self.public_tag.id)
 
-    def test_tag_resource_payload_validates_flarum_schema_rules(self):
+    def test_tag_resource_payload_validates_jsonapi_schema_rules(self):
         registry = ResourceRegistry()
         registry.register_resource(TagResource())
 
@@ -3557,7 +3560,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(popular_response.status_code, 200, popular_response.content)
         refresh_stats.assert_not_called()
 
-    def test_tag_popular_can_return_flarum_jsonapi_document_when_requested(self):
+    def test_tag_popular_can_return_jsonapi_jsonapi_document_when_requested(self):
         response = self.client.get("/api/tags/popular", **self.jsonapi_header())
 
         self.assertEqual(response.status_code, 200, response.content)
@@ -5564,7 +5567,7 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(allowed_response.status_code, 200, allowed_response.content)
         self.assertIn(discussion.id, {item["id"] for item in allowed_response.json()["data"]})
 
-    def test_discussion_visibility_scope_filters_arbitrary_ability_like_flarum(self):
+    def test_discussion_visibility_scope_filters_arbitrary_ability_like_jsonapi(self):
         open_tag = Tag.objects.create(name="Arbitrary Open", slug="arbitrary-open")
         child_parent = Tag.objects.create(name="Arbitrary Parent", slug="arbitrary-parent")
         restricted_child = Tag.objects.create(
@@ -5714,7 +5717,7 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
         )
         discussion = create_runtime_discussion(
             title="View private should not apply tag scope",
-            content="Flarum skips view sub-abilities in tags scope.",
+            content="JSONAPI skips view sub-abilities in tags scope.",
             user=admin,
             extension_payload=discussion_tags_payload([staff_tag.id]),
         )
@@ -6026,7 +6029,7 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(tagged_event.added_tag_ids, (new_child_tag.id,))
         self.assertEqual(tagged_event.removed_tag_ids, (old_child_tag.id,))
 
-    def test_updating_discussion_tags_writes_audit_log_like_flarum(self):
+    def test_updating_discussion_tags_writes_audit_log_like_jsonapi(self):
         member_group = Group.objects.create(name="DiscussionTagAuditEditor", color="#4d698e")
         Permission.objects.create(group=member_group, permission="startDiscussion")
         Permission.objects.create(group=member_group, permission="discussion.reply")
@@ -6234,7 +6237,7 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
             },
         )
 
-    def test_consecutive_discussion_tagged_event_posts_merge_like_flarum(self):
+    def test_consecutive_discussion_tagged_event_posts_merge_like_jsonapi(self):
         member_group = Group.objects.create(name="DiscussionTagMergeEditor", color="#4d698e")
         Permission.objects.create(group=member_group, permission="startDiscussion")
         Permission.objects.create(group=member_group, permission="discussion.reply")
@@ -6272,7 +6275,7 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(len(tagged_posts), 1)
         self.assertEqual(tagged_posts[0].content, f"added:{third_tag.name}\nremoved:{first_tag.name}")
 
-    def test_reverted_discussion_tagged_event_post_is_deleted_like_flarum(self):
+    def test_reverted_discussion_tagged_event_post_is_deleted_like_jsonapi(self):
         member_group = Group.objects.create(name="DiscussionTagRevertEditor", color="#4d698e")
         Permission.objects.create(group=member_group, permission="startDiscussion")
         Permission.objects.create(group=member_group, permission="discussion.reply")
@@ -6474,7 +6477,7 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
         self.assertEqual(tag.discussion_count, 1)
         self.assertEqual(tag.last_posted_discussion_id, older_discussion.id)
 
-    def test_create_discussion_requires_tags_relationship_without_bypass_permission(self):
+    def test_create_discussion_allows_missing_tags_relationship_by_default(self):
         group = Group.objects.create(name="StartWithoutBypass", color="#4d698e")
         Permission.objects.create(group=group, permission="startDiscussion")
         self.author.user_groups.add(group)
@@ -6485,7 +6488,28 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
             "/api/discussions/",
             data=json.dumps(discussion_resource_payload(
                 title="Missing tags relationship",
-                content="Creating without tags should be rejected by the resource schema.",
+                content="Creating without tags should be allowed when no minimum tag count is configured.",
+            )),
+            content_type="application/json",
+            **self.auth_header(),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["tags"], [])
+
+    def test_create_discussion_requires_tags_relationship_when_minimum_tags_configured(self):
+        set_tags_setting("min_primary_tags", 1)
+        group = Group.objects.create(name="StartRequiresTags", color="#4d698e")
+        Permission.objects.create(group=group, permission="startDiscussion")
+        self.author.user_groups.add(group)
+        if hasattr(self.author, "_forum_permission_cache"):
+            delattr(self.author, "_forum_permission_cache")
+
+        response = self.client.post(
+            "/api/discussions/",
+            data=json.dumps(discussion_resource_payload(
+                title="Missing configured tags relationship",
+                content="Creating without tags should be rejected when a minimum tag count is configured.",
             )),
             content_type="application/json",
             **self.auth_header(),
@@ -6506,7 +6530,7 @@ class TagDiscussionForumApiTests(ExtensionRuntimeTestMixin, TestCase):
             "/api/discussions/",
             data=json.dumps(discussion_resource_payload(
                 title="Missing tags with bypass",
-                content="Bypass permission matches Flarum's optional tags relationship.",
+                content="Bypass permission matches JSONAPI's optional tags relationship.",
             )),
             content_type="application/json",
             **self.auth_header(),
@@ -6887,7 +6911,7 @@ class AdminTagManagementApiTests(TestCase):
         self.assertEqual(created_tag.default_sort, "top")
         self.assertEqual(created_tag.reply_scope, "staff")
 
-    def test_admin_tag_api_writes_flarum_style_lifecycle_audit_logs(self):
+    def test_admin_tag_api_writes_jsonapi_style_lifecycle_audit_logs(self):
         create_response = self.client.post(
             "/api/admin/tags",
             data=json.dumps({
@@ -6925,7 +6949,7 @@ class AdminTagManagementApiTests(TestCase):
         self.assertEqual(updated_log.data["changed_fields"], ["name"])
         self.assertEqual(deleted_log.data["slug"], "admin-audit-tag")
 
-    def test_admin_tag_api_noop_update_does_not_write_flarum_style_update_audit(self):
+    def test_admin_tag_api_noop_update_does_not_write_jsonapi_style_update_audit(self):
         response = self.client.put(
             f"/api/admin/tags/{self.parent_tag.id}",
             data=json.dumps({"name": self.parent_tag.name}),
@@ -6955,7 +6979,7 @@ class AdminTagManagementApiTests(TestCase):
         self.assertEqual(space_response.status_code, 400, space_response.content)
         self.assertFalse(Tag.objects.filter(name__in=["后台非法 slug", "后台非法空白 slug"]).exists())
 
-    def test_admin_tag_api_rejects_description_longer_than_flarum_limit(self):
+    def test_admin_tag_api_rejects_description_longer_than_jsonapi_limit(self):
         response = self.client.post(
             "/api/admin/tags",
             data=json.dumps({
@@ -7303,7 +7327,7 @@ class AdminTagManagementApiTests(TestCase):
 
         self.assertEqual(response.status_code, 403, response.content)
 
-    def test_flarum_compatible_order_tags_route_returns_no_content(self):
+    def test_jsonapi_compatible_order_tags_route_returns_no_content(self):
         response = self.client.post(
             "/api/tags/order",
             data=json.dumps({
@@ -7330,7 +7354,7 @@ class AdminTagManagementApiTests(TestCase):
         self.assertEqual(self.child_tag.parent_id, self.parent_tag.id)
         self.assertEqual(self.child_tag.position, 0)
 
-    def test_flarum_compatible_order_tags_route_requires_admin(self):
+    def test_jsonapi_compatible_order_tags_route_requires_admin(self):
         response = self.client.post(
             "/api/tags/order",
             data=json.dumps({"order": [{"id": self.parent_tag.id, "children": []}]}),
@@ -7340,7 +7364,7 @@ class AdminTagManagementApiTests(TestCase):
 
         self.assertEqual(response.status_code, 403, response.content)
 
-    def test_flarum_compatible_order_tags_route_rejects_missing_order(self):
+    def test_jsonapi_compatible_order_tags_route_rejects_missing_order(self):
         response = self.client.post(
             "/api/tags/order",
             data=json.dumps({}),
