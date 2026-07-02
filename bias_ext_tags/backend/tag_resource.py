@@ -25,6 +25,7 @@ def _runtime_service_method(service_key: str, name: str):
 
 def tag_endpoint_specs() -> tuple[ResourceEndpoint, ...]:
     from bias_ext_tags.backend.responses import (
+        dispatch_tag_index,
         dispatch_tag_popular,
     )
     from bias_ext_tags.backend.responses import (
@@ -44,6 +45,7 @@ def tag_endpoint_specs() -> tuple[ResourceEndpoint, ...]:
         ResourceEndpoint.index()
         .at("/tags", absolute=True)
         .add_default_include(("parent",))
+        .with_handler(dispatch_tag_index)
         .plain_response(core_index_tag_response),
         ResourceEndpoint.index("popular")
         .at("/tags/popular", absolute=True)
@@ -213,61 +215,9 @@ class TagResource(DatabaseResource):
         ]
 
     def query(self, context):
-        from django.db.models import Prefetch, Q
+        from bias_ext_tags.backend.responses import prepare_tag_index_context, tag_index_queryset
 
-        from bias_ext_tags.backend.query_params import (
-            can_include_hidden_tags,
-            tag_bool_query_value,
-            tag_current_discussion_tag_ids,
-            tag_int_query_value,
-            tag_purpose_query_value,
-            tag_resource_options,
-        )
-        from bias_ext_tags.backend.services import TagService
-
-        user = context.get("user")
-        purpose = tag_purpose_query_value(context)
-        resource_options = tag_resource_options(context)
-        include_hidden = tag_bool_query_value(context, "include_hidden", False)
-        include_children = tag_bool_query_value(context, "include_children", True)
-        children_requested = include_children or "children" in resource_options.includes
-        discussion_tag_ids = tag_current_discussion_tag_ids(context) if purpose == "add_to_discussion" else ()
-
-        if include_hidden and not can_include_hidden_tags(user):
-            include_hidden = False
-
-        context["action"] = purpose
-        context["resource_options"] = resource_options
-        context["include_hidden"] = include_hidden
-        context["include_children"] = include_children
-        context["children_requested"] = children_requested
-        context["discussion_tag_ids"] = discussion_tag_ids
-        context.setdefault("_tag_cache", {})
-
-        queryset = Tag.objects.select_related("last_posted_discussion", "last_posted_user", "parent").all()
-        if children_requested:
-            queryset = queryset.prefetch_related(
-                Prefetch(
-                    "children",
-                    queryset=_scope_tag_children_relationship(Tag.objects.all(), context),
-                    to_attr="visible_children",
-                )
-            )
-
-        parent_id = tag_int_query_value(context, "parent_id")
-        if parent_id is None and not wants_jsonapi_response(context):
-            queryset = queryset.filter(parent__isnull=True)
-        elif parent_id is not None:
-            queryset = queryset.filter(parent_id=parent_id)
-        if not include_hidden:
-            queryset = queryset.filter(is_hidden=False)
-        queryset = TagService.filter_tags_for_user(queryset, user, action=purpose)
-        if discussion_tag_ids:
-            queryset = queryset | Tag.objects.filter(
-                Q(id__in=discussion_tag_ids) | Q(children__id__in=discussion_tag_ids)
-            )
-        context["tag_index_scope_applied"] = True
-        return queryset
+        return tag_index_queryset(prepare_tag_index_context(context))
 
     def scope(self, queryset, context):
         from bias_ext_tags.backend.services import TagService

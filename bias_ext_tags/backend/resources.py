@@ -269,11 +269,13 @@ def can_view_tag_admin_fields(context: dict) -> bool:
 
 def can_view_tag_stored_slug(tag, context: dict) -> bool:
     user = context.get("user")
-    return bool(
-        user
-        and getattr(user, "is_authenticated", False)
-        and _runtime_service_method("users.service", "has_forum_permission")(user, "tag.edit")
-    )
+    if not user or not getattr(user, "is_authenticated", False):
+        return False
+    cache = context.setdefault("_tag_capability_cache", {})
+    key = ("stored_slug", getattr(user, "id", None), bool(getattr(user, "is_staff", False)), bool(getattr(user, "is_superuser", False)))
+    if key not in cache:
+        cache[key] = bool(_runtime_service_method("users.service", "has_forum_permission")(user, "tag.edit"))
+    return cache[key]
 
 
 def resolve_tag_state(tag, context: dict) -> dict | None:

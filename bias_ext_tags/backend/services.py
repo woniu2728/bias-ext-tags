@@ -106,6 +106,12 @@ def _apply_runtime_counted_discussion_filter(queryset, **kwargs):
     return _runtime_service_method("content.discussions", "apply_counted_filter")(queryset, **kwargs)
 
 
+def _bump_anonymous_tag_index_cache_version() -> None:
+    from bias_ext_tags.backend.responses import bump_anonymous_tag_index_cache_version
+
+    bump_anonymous_tag_index_cache_version()
+
+
 class TagService:
     """标签服务"""
 
@@ -1286,6 +1292,7 @@ class TagService:
                 sibling.position = index
 
             Tag.objects.bulk_update(siblings, ["position"])
+            _bump_anonymous_tag_index_cache_version()
 
         return True
 
@@ -1352,6 +1359,7 @@ class TagService:
                 tag.is_primary = True
 
             Tag.objects.bulk_update(tags_by_id.values(), ["parent_id", "position", "is_primary"])
+            _bump_anonymous_tag_index_cache_version()
 
         return list(Tag.objects.select_related("parent").all().order_by(*TagService.structure_order_by(include_id=True)))
 
@@ -1378,6 +1386,7 @@ class TagService:
                 sibling.position = index
             if siblings:
                 Tag.objects.bulk_update(siblings, ["position"])
+                _bump_anonymous_tag_index_cache_version()
 
     @staticmethod
     def _would_create_cycle(tag: Tag, new_parent: Tag) -> bool:
@@ -1477,9 +1486,11 @@ class TagService:
         if getattr(discussion, "is_private", False):
             return 0
 
-        Tag.objects.filter(id__in=normalized_tag_ids).update(
+        updated = Tag.objects.filter(id__in=normalized_tag_ids).update(
             discussion_count=F("discussion_count") + 1,
         )
+        if updated:
+            _bump_anonymous_tag_index_cache_version()
 
         return TagService.update_tag_latest_discussion(discussion, normalized_tag_ids)
 
@@ -1501,13 +1512,16 @@ class TagService:
         if getattr(discussion, "last_posted_at", None) is not None:
             latest_candidate |= Q(last_posted_at__lte=discussion.last_posted_at)
 
-        return Tag.objects.filter(
+        updated = Tag.objects.filter(
             Q(id__in=normalized_tag_ids) & latest_candidate
         ).update(
             last_posted_at=discussion.last_posted_at,
             last_posted_discussion_id=discussion.id,
             last_posted_user_id=getattr(discussion, "last_posted_user_id", None),
         )
+        if updated:
+            _bump_anonymous_tag_index_cache_version()
+        return updated
 
     @staticmethod
     def adjust_tag_stats_for_discussion_visibility(
@@ -1524,9 +1538,11 @@ class TagService:
             TagService.increment_tag_stats_for_discussion(discussion, normalized_tag_ids)
             return
 
-        Tag.objects.filter(id__in=normalized_tag_ids).update(
+        updated = Tag.objects.filter(id__in=normalized_tag_ids).update(
             discussion_count=F("discussion_count") - 1,
         )
+        if updated:
+            _bump_anonymous_tag_index_cache_version()
         latest_tag_ids = list(
             Tag.objects.filter(
                 id__in=normalized_tag_ids,
@@ -1547,9 +1563,11 @@ class TagService:
         added_ids = sorted({int(tag_id) for tag_id in (added_tag_ids or []) if tag_id})
 
         if removed_ids:
-            Tag.objects.filter(id__in=removed_ids).update(
+            updated = Tag.objects.filter(id__in=removed_ids).update(
                 discussion_count=F("discussion_count") - 1,
             )
+            if updated:
+                _bump_anonymous_tag_index_cache_version()
             latest_removed_ids = list(
                 Tag.objects.filter(
                     id__in=removed_ids,
@@ -1584,9 +1602,11 @@ class TagService:
         if not normalized_tag_ids:
             return
 
-        Tag.objects.filter(id__in=normalized_tag_ids).update(
+        updated = Tag.objects.filter(id__in=normalized_tag_ids).update(
             discussion_count=F("discussion_count") - 1,
         )
+        if updated:
+            _bump_anonymous_tag_index_cache_version()
         latest_ids = sorted({int(tag_id) for tag_id in (latest_tag_ids or []) if tag_id})
         if latest_ids:
             TagService.refresh_tag_stats(latest_ids)
@@ -1691,6 +1711,7 @@ class TagService:
             tags,
             ["discussion_count", "last_posted_at", "last_posted_discussion", "last_posted_user"],
         )
+        _bump_anonymous_tag_index_cache_version()
         return {
             "refreshed_count": len(tags),
             "duration_ms": round((time.perf_counter() - started_at) * 1000, 3),

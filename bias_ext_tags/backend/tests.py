@@ -3,6 +3,7 @@ import re
 import ast
 from pathlib import Path
 
+from django.core.cache import cache
 from django.core.exceptions import PermissionDenied
 from django.core.management import call_command
 from django.db import connection
@@ -3094,6 +3095,82 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
             "Tag children include should use the prefetched child collection instead of querying per parent tag.",
         )
 
+    def test_tag_index_plain_response_has_fixed_query_budget_for_200_tags(self):
+        for index in range(199):
+            parent = Tag.objects.create(
+                name=f"容量标签 {index:03d}",
+                slug=f"capacity-tag-{index:03d}",
+                position=index + 1,
+            )
+            if index < 10:
+                Tag.objects.create(
+                    name=f"容量子标签 {index:03d}",
+                    slug=f"capacity-child-{index:03d}",
+                    parent=parent,
+                    position=0,
+                )
+
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get("/api/tags", {"include": "children"})
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()["data"]
+        self.assertEqual(len(payload), 200)
+        self.assertEqual(
+            sum(len(item["children"]) for item in payload),
+            10,
+        )
+        self.assertLessEqual(
+            len(queries),
+            12,
+            "Tag index should keep a fixed SQL budget for 200 visible tags.",
+        )
+
+    def test_guest_tag_index_reuses_short_lived_cache_and_invalidates_on_tag_update(self):
+        cache.clear()
+        for index in range(5):
+            Tag.objects.create(
+                name=f"缓存标签 {index}",
+                slug=f"cached-tag-{index}",
+                position=index + 1,
+            )
+
+        with patch(
+            "bias_ext_tags.backend.responses.serialize_tag_index_fast",
+            wraps=__import__(
+                "bias_ext_tags.backend.responses",
+                fromlist=["serialize_tag_index_fast"],
+            ).serialize_tag_index_fast,
+        ) as serialize_fast:
+            first_response = self.client.get("/api/tags", {"include_children": False})
+            second_response = self.client.get("/api/tags", {"include_children": False})
+
+        self.assertEqual(first_response.status_code, 200, first_response.content)
+        self.assertEqual(second_response.status_code, 200, second_response.content)
+        self.assertEqual(first_response.json(), second_response.json())
+        self.assertEqual(
+            serialize_fast.call_count,
+            len(first_response.json()["data"]),
+            "Second anonymous tag index request should reuse cached payload.",
+        )
+
+        tag = Tag.objects.get(slug="cached-tag-0")
+        tag.name = "缓存标签已更新"
+        tag.save(update_fields=["name", "updated_at"])
+
+        with patch(
+            "bias_ext_tags.backend.responses.serialize_tag_index_fast",
+            wraps=__import__(
+                "bias_ext_tags.backend.responses",
+                fromlist=["serialize_tag_index_fast"],
+            ).serialize_tag_index_fast,
+        ) as serialize_fast_after_update:
+            updated_response = self.client.get("/api/tags", {"include_children": False})
+
+        self.assertEqual(updated_response.status_code, 200, updated_response.content)
+        self.assertIn("缓存标签已更新", {item["name"] for item in updated_response.json()["data"]})
+        self.assertGreater(serialize_fast_after_update.call_count, 0)
+
     def test_tag_list_skips_child_prefetch_when_children_are_not_requested(self):
         Tag.objects.create(
             name="无需预加载子标签",
@@ -3258,7 +3335,7 @@ class TagAccessApiTests(ExtensionRuntimeTestMixin, TestCase):
             for endpoint in registry.get_dispatch_endpoints("tag")
         }
 
-        self.assertIn(("index", "/tags", False), routes)
+        self.assertIn(("index", "/tags", True), routes)
         self.assertIn(("show", "/tags/{object_id}", False), routes)
         self.assertIn(("show-by-slug", "/tags/slug/{object_id}", False), routes)
         self.assertIn(("create", "/tags", False), routes)
